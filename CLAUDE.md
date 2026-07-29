@@ -50,6 +50,10 @@ integrados, expediente clínico, multiidioma, app móvil, microservicios.
 - Commits pequeños y descriptivos. PRs por feature, no por archivo.
 - Antes de cualquier cambio al esquema de base de datos: confirmar que la tabla tiene RLS.
 - Antes de tocar el prompt del bot: revisar los guardrails de este archivo primero.
+## Nota técnica: dos conexiones a Supabase
+- `DATABASE_URL` (Transaction pooler, puerto 6543) → usar en runtime de la app (lib/db/index.ts)
+- `DIRECT_DATABASE_URL` (Session pooler) → usar solo para drizzle-kit push/migraciones
+  (el Transaction pooler se cuelga con drizzle-kit, es una limitación conocida)
 
 ## Fuente de verdad
 El roadmap completo, backlog y decisiones viven en `DentIA_Plan_de_Accion.xlsx`
