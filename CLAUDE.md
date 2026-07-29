@@ -34,7 +34,7 @@ equipo de un solo desarrollador (Fabián), bootstrapped (<$50/mes).
    confirmado el resultado real** contra Google Calendar / Supabase.
 5. **Nunca cancelar o reprogramar una cita sin confirmación explícita del paciente.**
 6. Secretos solo en variables de entorno (Vercel/Supabase). Nunca en el repo, nunca
-   hardcodeados, nunca en un `.env` commiteado.
+   hardcodeados, nunca en un `.env` commiteado. Nunca pegados en chats ni tickets.
 
 ## Alcance del MVP (no construir de más)
 Sí: bot de WhatsApp (FAQs, agendar, confirmar, reprogramar, cancelar), clasificación de
@@ -47,13 +47,32 @@ integrados, expediente clínico, multiidioma, app móvil, microservicios.
 ## Convenciones
 - Componentes y funciones en inglés; textos de cara al usuario (UI, mensajes del bot) en
   español de Costa Rica.
-- Commits pequeños y descriptivos. PRs por feature, no por archivo.
+- Commits en inglés, pequeños y descriptivos (ej. "Add appointment status enum", no
+  "Agregar estado de citas"). PRs por feature, no por archivo.
 - Antes de cualquier cambio al esquema de base de datos: confirmar que la tabla tiene RLS.
 - Antes de tocar el prompt del bot: revisar los guardrails de este archivo primero.
+
 ## Nota técnica: dos conexiones a Supabase
 - `DATABASE_URL` (Transaction pooler, puerto 6543) → usar en runtime de la app (lib/db/index.ts)
 - `DIRECT_DATABASE_URL` (Session pooler) → usar solo para drizzle-kit push/migraciones
   (el Transaction pooler se cuelga con drizzle-kit, es una limitación conocida)
+
+## Estado del modelo de datos
+Las 13 tablas del modelo conceptual ya están creadas en Supabase (dentia-dev) con RLS
+activo en todas y políticas de SELECT para staff autenticado (`clinics`, `clinic_members`,
+`patients`, `leads`, `conversations`, `messages`, `appointments`, `faqs`, `escalations`,
+`consents`, `audit_logs`, `whatsapp_integrations`, `calendar_integrations`).
+
+Faltan intencionalmente las políticas de INSERT/UPDATE — las escrituras las hace el
+backend con la service role key (que bypassa RLS), no el usuario autenticado del panel.
+
+`whatsapp_integrations` y `calendar_integrations` tienen RLS activo sin ninguna política
+de SELECT — nadie usando la clave pública debe poder leerlas, solo el backend vía service
+role key. Contienen tokens/secretos en texto plano; si el proyecto escala a varias
+clínicas, cifrar a nivel de aplicación antes de guardarlos.
+
+Próximo paso pendiente: webhook de WhatsApp (recepción de mensajes + registro de la app
+en Meta for Developers).
 
 ## Fuente de verdad
 El roadmap completo, backlog y decisiones viven en `DentIA_Plan_de_Accion.xlsx`
