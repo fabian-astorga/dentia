@@ -1,10 +1,15 @@
-const WHATSAPP_API_URL = `https://graph.facebook.com/v21.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+import { requireEnv } from "@/lib/env";
+import { WHATSAPP_API_VERSION, WHATSAPP_GRAPH_BASE_URL } from "./constants";
 
 export async function sendWhatsAppMessage(to: string, text: string) {
-  const response = await fetch(WHATSAPP_API_URL, {
+  const phoneNumberId = requireEnv("WHATSAPP_PHONE_NUMBER_ID");
+  const accessToken = requireEnv("WHATSAPP_ACCESS_TOKEN");
+  const url = `${WHATSAPP_GRAPH_BASE_URL}/${WHATSAPP_API_VERSION}/${phoneNumberId}/messages`;
+
+  const response = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({

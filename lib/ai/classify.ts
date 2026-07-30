@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { CLASSIFIER_MODEL, CLASSIFIER_MAX_TOKENS } from "./constants";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -35,17 +36,14 @@ Respondé ÚNICAMENTE con un JSON válido, sin texto adicional, con este formato
 
 export async function classifyIntent(messageText: string): Promise<ClassificationResult> {
   const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5",
-    max_tokens: 200,
+    model: CLASSIFIER_MODEL,
+    max_tokens: CLASSIFIER_MAX_TOKENS,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: messageText }],
   });
 
   const textBlock = response.content.find((block) => block.type === "text");
   const rawText = textBlock?.text ?? "";
-
-  // Strip markdown code fences in case the model wraps the JSON in them
-  // despite instructions not to.
   const cleaned = rawText.replace(/```json\s*|\s*```/g, "").trim();
 
   try {
@@ -54,11 +52,11 @@ export async function classifyIntent(messageText: string): Promise<Classificatio
       return parsed;
     }
     console.error("Classification JSON parsed but intent was invalid:", parsed);
-  } catch (err) {
+  } catch {
     console.error("Failed to parse classification response. Raw text was:", rawText);
   }
 
-  // If parsing fails for any reason, fail safe toward human escalation —
-  // never guess in a direction that could skip a real concern.
+  // Fail safe toward human escalation — never guess in a direction
+  // that could skip a real concern.
   return { intent: "caso_especial", reasoning: "No se pudo clasificar con confianza" };
 }

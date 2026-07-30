@@ -1,58 +1,19 @@
 import { Bevan, Inter } from "next/font/google";
 import Link from "next/link";
-import { db } from "@/lib/db";
-import { conversations, messages } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { DEV_CLINIC_ID } from "@/lib/config";
+import { listConversationsForClinic } from "@/lib/db/queries/conversations";
+import { listMessagesForConversation } from "@/lib/db/queries/messages";
+import { STATUS_LABEL, STATUS_STYLE, INTENT_LABEL, INTENT_STYLE } from "@/lib/ui/labels";
+import { relativeTime } from "@/lib/utils/time";
 
 const bevan = Bevan({ subsets: ["latin"], weight: "400", variable: "--font-display" });
 const inter = Inter({ subsets: ["latin"], variable: "--font-body" });
 
-// TODO: move to shared config once multi-clinic auth exists (see lib/whatsapp webhook)
-const CLINIC_ID = "5810d14e-6a13-4371-8a64-dc7a65f68337";
-
-const STATUS_LABEL: Record<string, string> = { active: "Activa", escalated: "Escalada", closed: "Cerrada" };
-const STATUS_STYLE: Record<string, string> = {
-  active: "bg-[#E1F5EE] text-[#085041]",
-  escalated: "bg-[#FAECE7] text-[#712B13]",
-  closed: "bg-[#F1EFE8] text-[#5F5E5A]",
-};
-const INTENT_LABEL: Record<string, string> = {
-  faq: "Pregunta general",
-  agendar_cita: "Agendar cita",
-  caso_especial: "Caso especial",
-};
-const INTENT_STYLE: Record<string, string> = {
-  faq: "bg-[#E1F5EE] text-[#085041]",
-  agendar_cita: "bg-[#EEEDFE] text-[#26215C]",
-  caso_especial: "bg-[#FAECE7] text-[#712B13]",
-};
-
-function relativeTime(date: Date) {
-  const diffMin = Math.round((Date.now() - date.getTime()) / 60000);
-  if (diffMin < 1) return "ahora";
-  if (diffMin < 60) return `hace ${diffMin} min`;
-  const diffH = Math.round(diffMin / 60);
-  if (diffH < 24) return `hace ${diffH} h`;
-  return `hace ${Math.round(diffH / 24)} d`;
-}
-
-async function getConversations() {
-  return db
-    .select()
-    .from(conversations)
-    .where(eq(conversations.clinicId, CLINIC_ID))
-    .orderBy(desc(conversations.lastMessageAt));
-}
-
-async function getMessages(conversationId: string) {
-  return db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(messages.createdAt);
-}
-
 export default async function PanelPage({ searchParams }: { searchParams: Promise<{ id?: string }> }) {
   const { id } = await searchParams;
-  const allConversations = await getConversations();
+  const allConversations = await listConversationsForClinic(DEV_CLINIC_ID);
   const selectedId = id ?? allConversations[0]?.id;
-  const thread = selectedId ? await getMessages(selectedId) : [];
+  const thread = selectedId ? await listMessagesForConversation(selectedId) : [];
   const selected = allConversations.find((c) => c.id === selectedId);
 
   return (
@@ -62,8 +23,8 @@ export default async function PanelPage({ searchParams }: { searchParams: Promis
           <div className="flex items-center gap-2">
             <span className="text-lg leading-none">🦷</span>
             <span className="font-[family-name:var(--font-display)] text-[19px] tracking-wide uppercase text-[#1F3B57]">DentIA</span>
-        </div>
-        <div className="mt-3 h-[3px] w-10 bg-[#C99A3B]" />
+          </div>
+          <div className="mt-3 h-[3px] w-10 bg-[#C99A3B]" />
           <p className="mt-3 text-[11px] uppercase tracking-wide text-[#8A8778]">Conversaciones · {allConversations.length}</p>
         </div>
         <div className="flex-1 overflow-y-auto">
