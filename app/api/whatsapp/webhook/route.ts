@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { conversations, messages } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
+import { classifyIntent } from "@/lib/ai/classify";
 
 const CLINIC_ID = "5810d14e-6a13-4371-8a64-dc7a65f68337";
 
@@ -60,11 +61,14 @@ export async function POST(request: NextRequest) {
   }
 
   // Save the inbound message.
-  await db.insert(messages).values({
-    conversationId: conversation.id,
-    direction: "inbound",
-    content: messageText,
-  });
+  const [inboundMessage] = await db
+    .insert(messages)
+    .values({
+      conversationId: conversation.id,
+      direction: "inbound",
+      content: messageText,
+    })
+    .returning();
 
   // Keep lastMessageAt fresh for sorting/reminders later.
   await db
@@ -72,17 +76,36 @@ export async function POST(request: NextRequest) {
     .set({ lastMessageAt: new Date() })
     .where(eq(conversations.id, conversation.id));
 
-  // Fixed reply for now — no AI yet, just proving the send path works.
-  await sendWhatsAppMessage(fromPhone, "Recibí tu mensaje 🦷 (todavía estoy en pruebas)");
+  const classification = await classifyIntent(messageText);
 
-  // Save our own reply too, so the conversation history is complete.
+  // Save the detected intent on the inbound message we already stored.
+  await db
+    .update(messages)
+    .set({ detectedIntent: classification.intent })
+    .where(eq(messages.id, inboundMessage.id));
+
+  let replyText: string;
+  switch (classification.intent) {
+    case "faq":
+      replyText = "¡Hola! Gracias por escribir. Todavía estoy aprendiendo a responder preguntas — pronto voy a poder ayudarte con horarios, precios y ubicación 🦷";
+      break;
+    case "agendar_cita":
+      replyText = "¡Perfecto! Todavía estoy en pruebas y no puedo agendar citas reales todavía, pero ya entendí que querés una cita 📅";
+      break;
+    case "caso_especial":
+      replyText = "Entiendo que esto es importante. Te voy a poner en contacto directo con la clínica para que te atiendan lo antes posible.";
+      break;
+  }
+
+  await sendWhatsAppMessage(fromPhone, replyText);
+
   await db.insert(messages).values({
     conversationId: conversation.id,
     direction: "outbound",
-    content: "Recibí tu mensaje 🦷 (todavía estoy en pruebas)",
+    content: replyText,
   });
 
-  console.log(`Saved message from ${fromPhone}: "${messageText}"`);
+  console.log(`Intent detected: ${classification.intent} (${classification.reasoning})`);
 
   return new NextResponse("EVENT_RECEIVED", { status: 200 });
 }
