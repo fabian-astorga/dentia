@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { conversations, messages } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
+import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
+
+const CLINIC_ID = "5810d14e-6a13-4371-8a64-dc7a65f68337";
 
 // Meta calls this once, when you configure the webhook URL in the dashboard,
 // to confirm you actually own this endpoint.
@@ -20,11 +26,63 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
-  // Log raw payload for now — we'll wire this into the real conversation
-  // flow in the next step. Nothing gets processed yet.
-  console.log("WhatsApp webhook payload:", JSON.stringify(body, null, 2));
+  const entry = body?.entry?.[0];
+  const change = entry?.changes?.[0];
+  const incomingMessage = change?.value?.messages?.[0];
 
-  // Meta requires a fast 200 response, or it will retry (and eventually
-  // disable the webhook). Always acknowledge immediately.
+  // Status updates (delivered/read receipts) also come through here —
+  // we only care about actual messages for now.
+  if (!incomingMessage) {
+    return new NextResponse("EVENT_RECEIVED", { status: 200 });
+  }
+
+  const fromPhone = incomingMessage.from;
+  const messageText = incomingMessage.text?.body ?? "";
+
+  // Find an existing conversation for this (clinic, phone), or start one.
+  let [conversation] = await db
+    .select()
+    .from(conversations)
+    .where(
+      and(eq(conversations.clinicId, CLINIC_ID), eq(conversations.phone, fromPhone))
+    )
+    .limit(1);
+
+  if (!conversation) {
+    [conversation] = await db
+      .insert(conversations)
+      .values({
+        clinicId: CLINIC_ID,
+        phone: fromPhone,
+        status: "active",
+      })
+      .returning();
+  }
+
+  // Save the inbound message.
+  await db.insert(messages).values({
+    conversationId: conversation.id,
+    direction: "inbound",
+    content: messageText,
+  });
+
+  // Keep lastMessageAt fresh for sorting/reminders later.
+  await db
+    .update(conversations)
+    .set({ lastMessageAt: new Date() })
+    .where(eq(conversations.id, conversation.id));
+
+  // Fixed reply for now — no AI yet, just proving the send path works.
+  await sendWhatsAppMessage(fromPhone, "Recibí tu mensaje 🦷 (todavía estoy en pruebas)");
+
+  // Save our own reply too, so the conversation history is complete.
+  await db.insert(messages).values({
+    conversationId: conversation.id,
+    direction: "outbound",
+    content: "Recibí tu mensaje 🦷 (todavía estoy en pruebas)",
+  });
+
+  console.log(`Saved message from ${fromPhone}: "${messageText}"`);
+
   return new NextResponse("EVENT_RECEIVED", { status: 200 });
 }
