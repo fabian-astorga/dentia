@@ -33,3 +33,7 @@ export async function listConversationsForClinic(clinicId: string) {
     .where(eq(conversations.clinicId, clinicId))
     .orderBy(desc(conversations.lastMessageAt));
 }
+
+export async function updateConversationContext(conversationId: string, context: object) {
+  await db.update(conversations).set({ context }).where(eq(conversations.id, conversationId));
+}

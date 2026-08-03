@@ -1,14 +1,15 @@
 import { DEV_CLINIC_ID } from "@/lib/config";
-import { classifyIntent } from "@/lib/ai/classify";
+import { classifyIntent, type Intent } from "@/lib/ai/classify";
 import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
 import { BOT_REPLIES } from "@/lib/whatsapp/replies";
-import { findOrCreateConversation, touchConversation } from "@/lib/db/queries/conversations";
+import {
+  findOrCreateConversation,
+  touchConversation,
+  updateConversationContext,
+} from "@/lib/db/queries/conversations";
 import { insertMessage, setDetectedIntent } from "@/lib/db/queries/messages";
+import { handleSchedulingTurn, type SchedulingContext } from "@/lib/scheduling/handleSchedulingTurn";
 
-// Orchestrates one inbound WhatsApp message end to end: persist it,
-// classify intent, reply, and persist the reply. classifyIntent only
-// returns a decision — it never touches the database or sends anything
-// itself (CLAUDE.md rule #1: the AI never acts directly).
 export async function handleIncomingMessage(fromPhone: string, messageText: string) {
   const conversation = await findOrCreateConversation(DEV_CLINIC_ID, fromPhone);
 
@@ -20,10 +21,33 @@ export async function handleIncomingMessage(fromPhone: string, messageText: stri
 
   await touchConversation(conversation.id);
 
-  const classification = await classifyIntent(messageText);
-  await setDetectedIntent(inboundMessage.id, classification.intent);
+  const context = (conversation.context as SchedulingContext) ?? {};
+  const isMidScheduling = context.step === "collecting_date" || context.step === "awaiting_slot_selection";
 
-  const replyText = BOT_REPLIES[classification.intent];
+  let replyText: string;
+  let detectedIntent: Intent;
+
+  if (isMidScheduling) {
+    // La conversación ya está en un flujo de agenda — el mensaje se
+    // interpreta dentro de ese contexto, no se reclasifica de cero.
+    const result = await handleSchedulingTurn(DEV_CLINIC_ID, fromPhone, messageText, context);
+    replyText = result.replyText;
+    await updateConversationContext(conversation.id, result.newContext);
+    detectedIntent = "agendar_cita";
+  } else {
+    const classification = await classifyIntent(messageText);
+    detectedIntent = classification.intent;
+
+    if (classification.intent === "agendar_cita") {
+      const result = await handleSchedulingTurn(DEV_CLINIC_ID, fromPhone, messageText, {});
+      replyText = result.replyText;
+      await updateConversationContext(conversation.id, result.newContext);
+    } else {
+      replyText = BOT_REPLIES[classification.intent];
+    }
+  }
+
+  await setDetectedIntent(inboundMessage.id, detectedIntent);
   await sendWhatsAppMessage(fromPhone, replyText);
 
   await insertMessage({
@@ -32,5 +56,5 @@ export async function handleIncomingMessage(fromPhone: string, messageText: stri
     content: replyText,
   });
 
-  return { conversation, classification, replyText };
+  return { conversation, replyText };
 }
