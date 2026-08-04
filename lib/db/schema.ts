@@ -156,12 +156,13 @@ export const appointments = pgTable(
     // Free text for the MVP (single-calendar-per-clinic assumption,
     // see open decision DP02 — revisit if multi-dentist is confirmed).
     dentistName: text("dentist_name"),
-    scheduledAt: timestamp("scheduled_at").notNull(),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
     status: appointmentStatus("status").notNull().default("pending"),
     // Google Calendar event id, so we can update/cancel the real event
     // instead of trusting our own copy of the date.
     calendarEventId: text("calendar_event_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
   },
   (table) => [
     index("appointments_clinic_idx").on(table.clinicId),

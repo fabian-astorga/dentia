@@ -14,3 +14,8 @@ export async function findOrCreatePatient(clinicId: string, phone: string) {
   const [created] = await db.insert(patients).values({ clinicId, phone }).returning();
   return created;
 }
+
+export async function getPatientById(patientId: string) {
+  const [patient] = await db.select().from(patients).where(eq(patients.id, patientId)).limit(1);
+  return patient ?? null;
+}

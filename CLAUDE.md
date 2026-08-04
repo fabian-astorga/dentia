@@ -6,21 +6,44 @@ en Costa Rica. Automatiza recepción, agenda y captura de leads. MVP en construc
 equipo de un solo desarrollador (Fabián), bootstrapped (<$50/mes).
 
 ## Stack decidido — no cambiar sin actualizar el ADR correspondiente
-- Next.js 15 (App Router) + TypeScript + TailwindCSS + shadcn/ui
+- Next.js 15 (App Router) + TypeScript + TailwindCSS
 - Supabase (Postgres + Auth + RLS + Storage) — monolito full-stack en Next.js para el MVP
 - Drizzle ORM
-- Claude API — Haiku 4.5 como modelo primario, escalar a Sonnet 5 solo en casos ambiguos
+- Claude API — Haiku 4.5 como modelo primario para clasificación y extracción de datos
 - WhatsApp Business Cloud API (oficial, Meta) — nunca librerías no oficiales (Baileys, etc.)
-- Google Calendar API para disponibilidad y creación de eventos
-- Hosting: Vercel (frontend + API routes + webhook serverless)
+- Google Calendar API (OAuth) para disponibilidad y creación de eventos reales
+- Hosting: Vercel (aún no desplegado — corriendo solo en local por ahora)
 
 ## Estructura de carpetas (monolito modular por dominio)
-/app → rutas y páginas
-/lib/whatsapp → integración WhatsApp Cloud API
-/lib/ai → orquestador + prompts de Claude
-/lib/calendar → integración Google Calendar
-/lib/clinics → lógica multi-tenant y configuración por clínica
-/lib/db → esquema Drizzle, migraciones, queries
+```
+/app
+  /panel                        → panel visual (inbox de conversaciones)
+  /api/whatsapp/webhook         → recepción de mensajes de WhatsApp
+  /api/auth/google/start        → inicia el flujo OAuth de Calendar
+  /api/auth/google/callback     → recibe el resultado de OAuth y guarda tokens
+  /api/google/test              → ruta de debug temporal, borrar cuando ya no se use
+  /api/cron/send-reminders      → protegida por CRON_SECRET, dispara recordatorios 24h
+
+/lib
+  /whatsapp     → send.ts, types.ts, parseWebhookPayload.ts, replies.ts,
+                  handleIncomingMessage.ts (orquestador), constants.ts
+  /ai           → classify.ts (clasificación de intención), extractDate.ts
+                  (extracción de fecha/motivo), constants.ts
+  /google       → client.ts (OAuth), calendar.ts (lectura/creación de eventos),
+                  availability.ts (cálculo de huecos libres), constants.ts
+  /scheduling   → handleSchedulingTurn.ts (máquina de estados del flujo de agenda),
+                  matchSlotSelection.ts (interpretación determinística, sin IA),
+                  sendReminders.ts, constants.ts
+  /db
+    schema.ts, index.ts
+    /queries    → conversations.ts, messages.ts, appointments.ts, patients.ts,
+                  calendarIntegrations.ts — una función por operación, reusable
+                  y testeable por separado de las rutas
+  /ui           → labels.ts (labels/colores del panel)
+  /utils        → time.ts (tiempo relativo)
+  config.ts     → constantes compartidas (DEV_CLINIC_ID)
+  env.ts        → requireEnv() — falla ruidoso si falta una variable de entorno
+```
 
 ## Reglas de arquitectura no negociables
 1. **La IA nunca escribe directo a la base de datos, al calendario ni ejecuta acciones
@@ -35,6 +58,10 @@ equipo de un solo desarrollador (Fabián), bootstrapped (<$50/mes).
 5. **Nunca cancelar o reprogramar una cita sin confirmación explícita del paciente.**
 6. Secretos solo en variables de entorno (Vercel/Supabase). Nunca en el repo, nunca
    hardcodeados, nunca en un `.env` commiteado. Nunca pegados en chats ni tickets.
+7. **Interpretación determinística cuando es posible, IA solo cuando hace falta lenguaje
+   natural real.** Ejemplo: elegir cuál horario de una lista ya ofrecida eligió el
+   paciente (`matchSlotSelection.ts`) se resuelve con código simple, no con otra llamada
+   a Claude — más barato, más rápido, más confiable contra una lista que ya conocemos.
 
 ## Alcance del MVP (no construir de más)
 Sí: bot de WhatsApp (FAQs, agendar, confirmar, reprogramar, cancelar), clasificación de
@@ -51,28 +78,85 @@ integrados, expediente clínico, multiidioma, app móvil, microservicios.
   "Agregar estado de citas"). PRs por feature, no por archivo.
 - Antes de cualquier cambio al esquema de base de datos: confirmar que la tabla tiene RLS.
 - Antes de tocar el prompt del bot: revisar los guardrails de este archivo primero.
+- Toda fecha/hora mostrada al paciente debe especificar `timeZone: "America/Costa_Rica"`
+  explícitamente (nunca confiar en la zona horaria del servidor — funciona distinto en
+  local vs. producción; ya nos mordió una vez).
+- Toda columna de fecha/hora usada en lógica real de tiempo (no solo registro histórico)
+  debe declararse `timestamp(..., { withTimezone: true })` en el schema — sin esto, las
+  comparaciones de fecha entre JS (UTC) y Postgres quedan ambiguas.
+- Variables de entorno nuevas: usar `requireEnv()` de `lib/env.ts`, nunca
+  `process.env.X!` a mano — así falla con un mensaje claro en vez de un `undefined`
+  silencioso más adelante.
 
-## Nota técnica: dos conexiones a Supabase
-- `DATABASE_URL` (Transaction pooler, puerto 6543) → usar en runtime de la app (lib/db/index.ts)
-- `DIRECT_DATABASE_URL` (Session pooler) → usar solo para drizzle-kit push/migraciones
-  (el Transaction pooler se cuelga con drizzle-kit, es una limitación conocida)
+## Notas técnicas / lecciones aprendidas (evitar repetir estos errores)
+- **Supabase + drizzle-kit**: el Transaction pooler (puerto 6543, usado en runtime vía
+  `DATABASE_URL`) se cuelga con `drizzle-kit push`. Usar `DIRECT_DATABASE_URL` (Session
+  pooler) solo para migraciones.
+- **Claude a veces envuelve el JSON en \`\`\`json ... \`\`\`** aunque el prompt le pida
+  JSON puro — `classify.ts` y `extractDate.ts` limpian esos backticks antes de parsear.
+  Si se agregan más llamadas que esperan JSON, replicar ese cleanup.
+- **`&&` vs `??` con strings vacíos**: `"" && x` devuelve `""`, y `?? fallback` NO
+  reemplaza un string vacío (solo `null`/`undefined`). Usar condicionales explícitos
+  (`if`/ternario) en vez de encadenar `&&` y `??` cuando el valor intermedio puede ser
+  un string vacío.
+- **dotenv en `drizzle.config.ts`**: `dotenv/config` busca `.env` por defecto, no
+  `.env.local`. Hay que apuntarlo explícitamente: `config({ path: ".env.local" })`.
 
-## Estado del modelo de datos
-Las 13 tablas del modelo conceptual ya están creadas en Supabase (dentia-dev) con RLS
-activo en todas y políticas de SELECT para staff autenticado (`clinics`, `clinic_members`,
-`patients`, `leads`, `conversations`, `messages`, `appointments`, `faqs`, `escalations`,
-`consents`, `audit_logs`, `whatsapp_integrations`, `calendar_integrations`).
+## Cuentas externas
+Todas separadas de la cuenta personal de Fabián; identidad de negocio `dentia.cr@gmail.com`
+donde aplica (mismo patrón en cada proveedor: cuenta/organización propia de DentIA, no
+mezclada con cuentas personales).
 
-Faltan intencionalmente las políticas de INSERT/UPDATE — las escrituras las hace el
-backend con la service role key (que bypassa RLS), no el usuario autenticado del panel.
+- **GitHub**: repo privado `fabian-astorga/dentia`
+- **Supabase**: organización "DentIA", proyecto `dentia-dev`
+- **Meta for Developers**: Business Portfolio "DentIA", app `DentIA Dev`, número de
+  WhatsApp de prueba conectado. Token de acceso generado vía System User (`dentia-bot`),
+  válido 60 días desde su generación — **revisar fecha de expiración periódicamente**,
+  no hay alerta automática todavía.
+- **Anthropic Console**: cuenta `dentia.cr@gmail.com`, API key activa con crédito cargado
+- **Google Cloud**: proyecto `DentIA Dev` bajo `dentia.cr@gmail.com`. OAuth consent
+  screen en modo "Prueba" (no verificado por Google todavía — límite de 100 test users,
+  actualmente 2 agregados). Calendario de prueba: uno dedicado llamado "DentIA" dentro
+  de la cuenta de prueba, guardado como `google_calendar_id: primary` en
+  `calendar_integrations` (es el calendario principal de esa cuenta, solo renombrado).
+- **Vercel**: cuenta creada, proyecto aún no conectado/desplegado.
 
-`whatsapp_integrations` y `calendar_integrations` tienen RLS activo sin ninguna política
-de SELECT — nadie usando la clave pública debe poder leerlas, solo el backend vía service
-role key. Contienen tokens/secretos en texto plano; si el proyecto escala a varias
-clínicas, cifrar a nivel de aplicación antes de guardarlos.
+## Estado actual del proyecto
+Circuito funcionando de punta a punta en local (probado con WhatsApp real):
 
-Próximo paso pendiente: webhook de WhatsApp (recepción de mensajes + registro de la app
-en Meta for Developers).
+```
+WhatsApp → Meta → webhook → Claude clasifica intención
+                                  ↓
+                    ¿agendar? → extrae fecha/motivo → Google Calendar (disponibilidad real)
+                                  ↓
+                    paciente elige horario → crea evento real + guarda en `appointments`
+                                  ↓
+                         confirma por WhatsApp
+```
+
+Completado:
+- Webhook de WhatsApp (recepción + verificación de Meta)
+- Clasificación de intención con Claude (`faq` / `agendar_cita` / `caso_especial`),
+  fail-safe hacia `caso_especial` si algo falla al parsear
+- Flujo completo de agendar cita con memoria conversacional (`conversations.context`
+  como máquina de estados: `collecting_date` → `awaiting_slot_selection` → cierre)
+- Integración real con Google Calendar (OAuth, lectura de disponibilidad, creación de
+  eventos)
+- Recordatorio 24h antes (`/api/cron/send-reminders`, protegido con `CRON_SECRET`,
+  disparado manualmente por ahora — falta programarlo en Vercel Cron cuando se despliegue)
+- Panel visual (`/panel`) — inbox de conversaciones, sin login todavía, consulta la
+  base directo server-side. Paleta: navy `#1F3B57`, teal `#0E7C7B`, coral `#D85A30`.
+  Tipografía: Bevan (wordmark/títulos) + Inter (todo lo funcional/denso)
+
+Pendiente (en orden sugerido, sin urgencia crítica salvo que se indique):
+- Reprogramar y cancelar citas (el MVP las incluye, todavía no están construidas)
+- Notificación real al staff cuando hay un `caso_especial` (hoy solo responde al
+  paciente, no avisa a nadie de la clínica)
+- Login del panel con Supabase Auth (hoy cualquiera con la URL ve las conversaciones)
+- Deploy a Vercel + configurar Vercel Cron para los recordatorios
+- Borrar `/api/google/test` cuando ya no se necesite para debug
+- Fusionar `classify.ts` y `extractDate.ts` en una sola llamada a Claude (optimización
+  de costo/latencia, no urgente)
 
 ## Fuente de verdad
 El roadmap completo, backlog y decisiones viven en `DentIA_Plan_de_Accion.xlsx`

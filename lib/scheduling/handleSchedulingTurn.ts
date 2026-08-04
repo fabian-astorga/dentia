@@ -25,6 +25,7 @@ function formatSlotForHuman(slot: TimeSlot): string {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
+    timeZone: "America/Costa_Rica",
   });
 }
 
@@ -81,9 +82,9 @@ export async function handleSchedulingTurn(
     };
   }
 
-  const durationMinutes =
-    (reason && APPOINTMENT_DURATION_BY_REASON[reason.toLowerCase()]) ??
-    DEFAULT_APPOINTMENT_DURATION_MINUTES;
+  const durationMinutes = reason
+  ? APPOINTMENT_DURATION_BY_REASON[reason.toLowerCase()] ?? DEFAULT_APPOINTMENT_DURATION_MINUTES
+  : DEFAULT_APPOINTMENT_DURATION_MINUTES;
 
   const slots = await getAvailableSlots(clinicId, extraction.date, durationMinutes);
 
