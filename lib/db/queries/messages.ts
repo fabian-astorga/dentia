@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { messages } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import type { Intent } from "@/lib/ai/classify";
+import type { DetectedIntent } from "@/lib/ai/classify";
 
 interface NewMessageInput {
   conversationId: string;
@@ -14,7 +14,7 @@ export async function insertMessage(input: NewMessageInput) {
   return created;
 }
 
-export async function setDetectedIntent(messageId: string, intent: Intent) {
+export async function setDetectedIntent(messageId: string, intent: DetectedIntent) {
   await db.update(messages).set({ detectedIntent: intent }).where(eq(messages.id, messageId));
 }
 
