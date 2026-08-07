@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireEnv } from "@/lib/env";
-import { extractInboundMessage } from "@/lib/whatsapp/parseWebhookPayload";
+import { extractInboundMessage, extractPhoneNumberId } from "@/lib/whatsapp/parseWebhookPayload";
 import { handleIncomingMessage } from "@/lib/whatsapp/handleIncomingMessage";
+import { getClinicIdByPhoneNumberId } from "@/lib/db/whatsappIntegrations";
 import type { WhatsAppWebhookPayload } from "@/lib/whatsapp/types";
 
-// Meta calls this once, when you configure the webhook URL in the dashboard,
-// to confirm you actually own this endpoint.
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const mode = searchParams.get("hub.mode");
@@ -19,18 +18,25 @@ export async function GET(request: NextRequest) {
   return new NextResponse("Forbidden", { status: 403 });
 }
 
-// Meta calls this every time a message (or status update) happens.
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as WhatsAppWebhookPayload;
   const incomingMessage = extractInboundMessage(body);
 
-  // Status updates (delivered/read receipts) also come through here —
-  // we only care about actual text messages for now.
   if (!incomingMessage?.text?.body) {
     return new NextResponse("EVENT_RECEIVED", { status: 200 });
   }
 
-  await handleIncomingMessage(incomingMessage.from, incomingMessage.text.body);
+  const phoneNumberId = extractPhoneNumberId(body);
+  const clinicId = phoneNumberId
+    ? await getClinicIdByPhoneNumberId(phoneNumberId)
+    : null;
+
+  if (!clinicId) {
+    console.error(`[webhook] No clinic found for phone_number_id=${phoneNumberId}`);
+    return new NextResponse("EVENT_RECEIVED", { status: 200 });
+  }
+
+  await handleIncomingMessage(clinicId, incomingMessage.from, incomingMessage.text.body);
 
   return new NextResponse("EVENT_RECEIVED", { status: 200 });
 }

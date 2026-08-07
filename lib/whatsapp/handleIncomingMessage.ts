@@ -1,7 +1,7 @@
-import { DEV_CLINIC_ID } from "@/lib/config";
-import { classifyIntent, type Intent } from "@/lib/ai/classify";
+import { classifyIntent, type DetectedIntent } from "@/lib/ai/classify";
 import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
 import { BOT_REPLIES } from "@/lib/whatsapp/replies";
+import { isGreeting } from "@/lib/whatsapp/isGreeting";
 import {
   findOrCreateConversation,
   touchConversation,
@@ -9,9 +9,16 @@ import {
 } from "@/lib/db/queries/conversations";
 import { insertMessage, setDetectedIntent } from "@/lib/db/queries/messages";
 import { handleSchedulingTurn, type SchedulingContext } from "@/lib/scheduling/handleSchedulingTurn";
+import { generateReply } from "@/lib/ai/generateReply";
+import { notifyStaffOfEscalation } from "@/lib/notifications/notifyStaff";
+import { insertEscalation } from "@/lib/db/queries/escalations";
 
-export async function handleIncomingMessage(fromPhone: string, messageText: string) {
-  const conversation = await findOrCreateConversation(DEV_CLINIC_ID, fromPhone);
+export async function handleIncomingMessage(
+  clinicId: string,
+  fromPhone: string,
+  messageText: string
+) {
+  const conversation = await findOrCreateConversation(clinicId, fromPhone);
 
   const inboundMessage = await insertMessage({
     conversationId: conversation.id,
@@ -22,28 +29,45 @@ export async function handleIncomingMessage(fromPhone: string, messageText: stri
   await touchConversation(conversation.id);
 
   const context = (conversation.context as SchedulingContext) ?? {};
-  const isMidScheduling = context.step === "collecting_date" || context.step === "awaiting_slot_selection";
+  const isMidScheduling =
+    context.step === "collecting_date" ||
+    context.step === "awaiting_slot_selection" ||
+    context.step === "confirming_cancellation" ||
+    context.step === "selecting_appointment";
 
   let replyText: string;
-  let detectedIntent: Intent;
+  let detectedIntent: DetectedIntent;
 
   if (isMidScheduling) {
-    // La conversación ya está en un flujo de agenda — el mensaje se
-    // interpreta dentro de ese contexto, no se reclasifica de cero.
-    const result = await handleSchedulingTurn(DEV_CLINIC_ID, fromPhone, messageText, context);
+    const result = await handleSchedulingTurn(clinicId, fromPhone, messageText, context);
     replyText = result.replyText;
     await updateConversationContext(conversation.id, result.newContext);
     detectedIntent = "agendar_cita";
+  } else if (isGreeting(messageText)) {
+    replyText = "¡Hola! 😊 Soy el asistente de la clínica. ¿En qué te puedo ayudar? Puedo agendar, reprogramar o cancelar una cita.";
+    detectedIntent = "saludo";
   } else {
     const classification = await classifyIntent(messageText);
     detectedIntent = classification.intent;
 
     if (classification.intent === "agendar_cita") {
-      const result = await handleSchedulingTurn(DEV_CLINIC_ID, fromPhone, messageText, {});
+      const result = await handleSchedulingTurn(clinicId, fromPhone, messageText, {});
       replyText = result.replyText;
       await updateConversationContext(conversation.id, result.newContext);
+    } else if (classification.intent === "faq") {
+      replyText = await generateReply({ situation: "faq_placeholder", facts: {} });
     } else {
-      replyText = BOT_REPLIES[classification.intent];
+      await notifyStaffOfEscalation({
+        clinicId,
+        patientPhone: fromPhone,
+        messageText,
+      });
+      await insertEscalation({
+        conversationId: conversation.id,
+        clinicId,
+        reason: "Mensaje clasificado como caso especial",
+      });
+      replyText = await generateReply({ situation: "escalation", facts: {} });
     }
   }
 
