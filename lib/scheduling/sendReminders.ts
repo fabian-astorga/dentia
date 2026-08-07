@@ -3,18 +3,9 @@ import { getPatientById } from "@/lib/db/queries/patients";
 import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
 import { findOrCreateConversation } from "@/lib/db/queries/conversations";
 import { insertMessage } from "@/lib/db/queries/messages";
+import { formatDateTimeForHuman } from "./format";
 
 const REMINDER_WINDOW_HOURS = 1; // busca citas entre 23h y 25h desde ahora
-
-function formatDateForHuman(date: Date): string {
-  return date.toLocaleString("es-CR", {
-    weekday: "long",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: "America/Costa_Rica",
-  });
-}
 
 export async function sendUpcomingReminders() {
   const now = new Date();
@@ -29,7 +20,7 @@ export async function sendUpcomingReminders() {
     const patient = await getPatientById(appointment.patientId);
     if (!patient) continue;
 
-    const reminderText = `Hola, te recordamos tu cita mañana ${formatDateForHuman(
+    const reminderText = `Hola, te recordamos tu cita mañana ${formatDateTimeForHuman(
       new Date(appointment.scheduledAt)
     )}. ¿Confirmás que asistís?`;
 

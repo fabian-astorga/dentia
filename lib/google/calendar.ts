@@ -50,3 +50,30 @@ export async function createCalendarEvent(
 
   return response.data;
 }
+
+export async function updateCalendarEvent(
+  clinicId: string,
+  eventId: string,
+  input: { startISO: string; endISO: string }
+) {
+  const { client, integration } = await getAuthorizedClient(clinicId);
+  const calendar = google.calendar({ version: "v3", auth: client });
+
+  const response = await calendar.events.patch({
+    calendarId: integration.googleCalendarId,
+    eventId,
+    requestBody: {
+      start: { dateTime: input.startISO, timeZone: "America/Costa_Rica" },
+      end: { dateTime: input.endISO, timeZone: "America/Costa_Rica" },
+    },
+  });
+
+  return response.data;
+}
+
+export async function deleteCalendarEvent(clinicId: string, eventId: string) {
+  const { client, integration } = await getAuthorizedClient(clinicId);
+  const calendar = google.calendar({ version: "v3", auth: client });
+
+  await calendar.events.delete({ calendarId: integration.googleCalendarId, eventId });
+}

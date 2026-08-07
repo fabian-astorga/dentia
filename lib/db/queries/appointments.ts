@@ -7,6 +7,7 @@ interface NewAppointmentInput {
   patientId: string;
   scheduledAt: Date;
   status: "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
+  calendarEventId?: string | null;
 }
 
 export async function insertAppointment(input: NewAppointmentInput) {
@@ -33,4 +34,34 @@ export async function markReminderSent(appointmentId: string) {
     .update(appointments)
     .set({ reminderSentAt: new Date() })
     .where(eq(appointments.id, appointmentId));
+}
+
+export async function getAppointmentById(appointmentId: string) {
+  const [appointment] = await db.select().from(appointments).where(eq(appointments.id, appointmentId)).limit(1);
+  return appointment ?? null;
+}
+
+export async function findActiveAppointmentsForPatient(clinicId: string, patientId: string) {
+  return db
+    .select()
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.clinicId, clinicId),
+        eq(appointments.patientId, patientId),
+        inArray(appointments.status, ["pending", "confirmed"])
+      )
+    )
+    .orderBy(appointments.scheduledAt);
+}
+
+export async function updateAppointmentStatus(
+  appointmentId: string,
+  status: "pending" | "confirmed" | "completed" | "cancelled" | "no_show"
+) {
+  await db.update(appointments).set({ status }).where(eq(appointments.id, appointmentId));
+}
+
+export async function rescheduleAppointmentRecord(appointmentId: string, newScheduledAt: Date) {
+  await db.update(appointments).set({ scheduledAt: newScheduledAt }).where(eq(appointments.id, appointmentId));
 }
