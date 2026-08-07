@@ -4,6 +4,7 @@ import { CLASSIFIER_MODEL } from "./constants";
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export type ReplySituation =
+  | "greeting"
   | "ask_date"
   | "offer_slots"
   | "booking_confirmed"
@@ -19,6 +20,8 @@ interface GenerateReplyInput {
 }
 
 const SITUATION_GUIDANCE: Record<ReplySituation, string> = {
+  greeting:
+    "El paciente solo saludó, sin pedir nada específico todavía. Saludalo con calidez y contale brevemente que podés ayudarlo a agendar, reprogramar o cancelar una cita.",
   ask_date: "El paciente quiere agendar o mover una cita. Preguntale con calidez qué día le queda mejor.",
   offer_slots:
     "Vas a ofrecer los horarios disponibles listados en los datos. Sé claro y organizado, pero natural — no como una lista robótica.",

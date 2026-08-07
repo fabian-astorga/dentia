@@ -44,7 +44,7 @@ export async function handleIncomingMessage(
     await updateConversationContext(conversation.id, result.newContext);
     detectedIntent = "agendar_cita";
   } else if (isGreeting(messageText)) {
-    replyText = "¡Hola! 😊 Soy el asistente de la clínica. ¿En qué te puedo ayudar? Puedo agendar, reprogramar o cancelar una cita.";
+    replyText = await generateReply({ situation: "greeting", facts: {} });
     detectedIntent = "saludo";
   } else {
     const classification = await classifyIntent(messageText);
