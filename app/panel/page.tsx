@@ -1,8 +1,7 @@
 import { Bevan, Inter } from "next/font/google";
 import Link from "next/link";
-import { DEV_CLINIC_ID } from "@/lib/config";
-import { listConversationsForClinic } from "@/lib/db/queries/conversations";
-import { listMessagesForConversation } from "@/lib/db/queries/messages";
+import { listConversationsForCurrentUser } from "@/lib/supabase/queries/conversations";
+import { listMessagesForConversationAsCurrentUser } from "@/lib/supabase/queries/messages";
 import { STATUS_LABEL, STATUS_STYLE, INTENT_LABEL, INTENT_STYLE } from "@/lib/ui/labels";
 import { relativeTime } from "@/lib/utils/time";
 
@@ -11,9 +10,9 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-body" });
 
 export default async function PanelPage({ searchParams }: { searchParams: Promise<{ id?: string }> }) {
   const { id } = await searchParams;
-  const allConversations = await listConversationsForClinic(DEV_CLINIC_ID);
+  const allConversations = await listConversationsForCurrentUser();
   const selectedId = id ?? allConversations[0]?.id;
-  const thread = selectedId ? await listMessagesForConversation(selectedId) : [];
+  const thread = selectedId ? await listMessagesForConversationAsCurrentUser(selectedId) : [];
   const selected = allConversations.find((c) => c.id === selectedId);
 
   return (
