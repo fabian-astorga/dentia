@@ -5,6 +5,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export type ReplySituation =
   | "greeting"
+  | "flow_exited"
   | "ask_date"
   | "offer_slots"
   | "booking_confirmed"
@@ -35,6 +36,8 @@ const SITUATION_GUIDANCE: Record<ReplySituation, string> = {
     "Este mensaje puede involucrar dolor, urgencia o algo que requiere atención humana. Respondé con calma y empatía genuina, sin minimizar ni alarmar, dejando claro que vas a poner en contacto directo con la clínica lo antes posible.",
   faq_placeholder:
     "Respondé con calidez que todavía estás aprendiendo a resolver preguntas frecuentes, pero que pronto vas a poder ayudar con horarios, precios y ubicación.",
+  flow_exited:
+    "El paciente decidió no seguir con lo que estaba haciendo (agendar, reprogramar o cancelar una cita). Respondé con calidez, sin insistir ni preguntar por qué, dejando claro que podés ayudarlo cuando quiera retomarlo."
 };
 
 const SYSTEM_PROMPT = `Sos DentIA, el asistente de WhatsApp de una clínica dental en Costa Rica.

@@ -7,6 +7,7 @@ import { getAvailableSlots } from "@/lib/google/availability";
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "@/lib/google/calendar";
 import { matchSlotSelection } from "./matchSlotSelection";
 import { isAffirmative } from "./isAffirmative";
+import { isDecline } from "./isDecline";
 import { formatTimeForHuman, formatDateTimeForHuman, formatDateLabel } from "./format";
 import {
   insertAppointment,
@@ -106,6 +107,16 @@ export async function handleSchedulingTurn(
   context: SchedulingContext
 ): Promise<SchedulingResult> {
   const todayISO = new Date().toISOString().slice(0, 10);
+
+  // Salida determinística de cualquier punto del flujo — evita el loop
+  // de "no logré identificar X" repetido indefinidamente si el paciente
+  // decide abandonar. Se excluye confirming_cancellation porque ese
+  // paso ya maneja sí/no explícito con isAffirmative, y ahí un "no"
+  // significa "no cancelar", no "salir de la conversación".
+  if (context.step !== "confirming_cancellation" && isDecline(messageText)) {
+    const replyText = await generateReply({ situation: "flow_exited", facts: {} });
+    return { replyText, newContext: {} };
+  }
 
   if (context.step === "selecting_appointment" && context.action) {
     const patient = await findOrCreatePatient(clinicId, phone);
