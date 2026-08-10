@@ -2,8 +2,8 @@
 
 ## Qué es esto
 Asistente de IA por WhatsApp para clínicas dentales pequeñas y medianas (1-5 dentistas)
-en Costa Rica. Automatiza recepción, agenda y captura de leads. MVP en construcción,
-equipo de un solo desarrollador (Fabián), bootstrapped (<$50/mes).
+en Costa Rica. Automatiza recepción, agenda y captura de leads. MVP **en producción real**
+(Vercel), equipo de un solo desarrollador (Fabián), bootstrapped (<$50/mes).
 
 ## Stack decidido — no cambiar sin actualizar el ADR correspondiente
 - Next.js 16 (App Router) + TypeScript + TailwindCSS
@@ -12,7 +12,9 @@ equipo de un solo desarrollador (Fabián), bootstrapped (<$50/mes).
 - Claude API — Haiku 4.5 como modelo primario para clasificación y extracción de datos
 - WhatsApp Business Cloud API (oficial, Meta) — nunca librerías no oficiales (Baileys, etc.)
 - Google Calendar API (OAuth) para disponibilidad y creación de eventos reales
-- Hosting: Vercel (aún no desplegado — corriendo solo en local por ahora)
+- Resend + React Email para correos transaccionales (reporte semanal)
+- **Hosting: Vercel, desplegado en producción** — `https://dentia-tawny.vercel.app`
+  (subdominio gratuito por ahora, sin dominio propio todavía)
 
 ## Estructura de carpetas (monolito modular por dominio)
 ```
@@ -23,10 +25,12 @@ equipo de un solo desarrollador (Fabián), bootstrapped (<$50/mes).
   /api/whatsapp/webhook         → recepción de mensajes de WhatsApp
   /api/auth/google/start        → inicia el flujo OAuth de Calendar
   /api/auth/google/callback     → recibe el resultado de OAuth y guarda tokens
-  /api/google/test              → ruta de debug temporal, borrar cuando ya no se use
-  /api/cron/send-reminders      → protegida por CRON_SECRET, dispara recordatorios 24h
+  /api/cron/send-reminders      → protegida por CRON_SECRET, corre 1x/día vía Vercel Cron
+  /api/cron/send-weekly-report  → protegida por CRON_SECRET, corre lunes vía Vercel Cron
 
-middleware.ts                   → protege /panel/*, redirige a /panel/login sin sesión
+vercel.json                     → configuración de Vercel Cron (ver "Cron jobs" abajo)
+proxy.ts                        → protege /panel/*, redirige a /panel/login sin sesión
+                                   (renombrado desde middleware.ts — convención Next.js 16)
 
 /lib
   /whatsapp     → send.ts, types.ts, parseWebhookPayload.ts (incluye
@@ -41,15 +45,23 @@ middleware.ts                   → protege /panel/*, redirige a /panel/login si
                   availability.ts (cálculo de huecos libres), constants.ts
   /scheduling   → handleSchedulingTurn.ts (máquina de estados del flujo de agenda),
                   matchSlotSelection.ts, matchAppointmentByText.ts, isAffirmative.ts,
-                  format.ts, sendReminders.ts, constants.ts
+                  format.ts, sendReminders.ts (ventana de día completo, ver Notas
+                  técnicas — ajustada para cron de 1x/día), constants.ts
   /notifications → notifyStaff.ts
+  /reports      → weekRange.ts — getPreviousWeekRange(), cálculo de semana en hora CR
+  /email
+    resend.ts   → cliente de Resend
+    sendWeeklyReport.ts
+    /templates  → WeeklyReportEmail.tsx (React Email)
   /db
     schema.ts, index.ts
     whatsappIntegrations.ts     → getClinicIdByPhoneNumberId() — resuelve clínica por
                                    phone_number_id de Meta, usado por el webhook
     /queries    → conversations.ts, messages.ts, appointments.ts, patients.ts,
-                  calendarIntegrations.ts, clinics.ts, escalations.ts — Drizzle,
-                  conexión directa, bypassa RLS a propósito (uso exclusivo del backend)
+                  calendarIntegrations.ts, clinics.ts, escalations.ts, reports.ts
+                  (métricas reales para el reporte semanal — sin "horas ahorradas",
+                  ver Alcance del MVP) — Drizzle, conexión directa, bypassa RLS a
+                  propósito (uso exclusivo del backend)
   /supabase
     server.ts   → createSupabaseServerClient() — cliente autenticado (Server
                   Components/Route Handlers), respeta RLS via cookies de sesión
@@ -67,6 +79,22 @@ middleware.ts                   → protege /panel/*, redirige a /panel/login si
                   falta para scripts de debug/seed locales
   env.ts        → requireEnv()
 ```
+
+## Cron jobs (Vercel Cron, `vercel.json`)
+Plan **Hobby (gratis)**: máximo 1 ejecución/día por cron, y la hora no es exacta (puede
+disparar hasta 1h después de lo configurado). Esto moldeó el diseño:
+
+- `send-reminders`: `0 14 * * *` (8am hora CR, todos los días). `sendReminders.ts` fue
+  ajustado para cubrir el **día calendario completo de mañana**, no una ventana angosta
+  de ±1h alrededor de las 24h exactas — con una sola corrida diaria, una ventana angosta
+  dejaría sin recordatorio a la mayoría de las citas. El aviso llega en algún punto entre
+  ~16 y ~33 horas antes de la cita, no exactamente a las 24h. Protegido contra duplicados
+  por `reminderSentAt IS NULL` en `getAppointmentsNeedingReminder`.
+- `send-weekly-report`: `0 13 * * 1` (7am hora CR, todos los lunes).
+
+Si en algún momento se necesita más frecuencia (ej. recordatorios más precisos), la
+opción es pasar a Vercel Pro ($20/mes) — evaluar contra el presupuesto de <$50/mes antes
+de hacerlo.
 
 ## Reglas de arquitectura no negociables
 1. **La IA nunca escribe directo a la base de datos, al calendario ni ejecuta acciones
@@ -93,7 +121,9 @@ middleware.ts                   → protege /panel/*, redirige a /panel/login si
    La `anon key` de Supabase es la excepción explícita — está diseñada para ser
    pública (`NEXT_PUBLIC_SUPABASE_ANON_KEY`), es RLS lo que la hace segura, no su
    confidencialidad. La `service_role key` sí es secreta — nunca usarla en el panel
-   ni en ninguna variable con prefijo `NEXT_PUBLIC_`.
+   ni en ninguna variable con prefijo `NEXT_PUBLIC_`. Variables de entorno migradas
+   a Vercel (Production and Preview) el 9 de agosto de 2026 — mantener sincronizadas
+   con `.env.local` manualmente, no hay un mecanismo automático todavía.
 7. **Interpretación determinística cuando es posible, IA solo cuando hace falta lenguaje
    natural real.** Ejemplos: `matchSlotSelection.ts` (qué horario eligió el paciente de
    una lista ya ofrecida), `isAffirmative.ts` (sí/no), `isGreeting.ts` (saludos simples,
@@ -103,16 +133,18 @@ middleware.ts                   → protege /panel/*, redirige a /panel/login si
 ## Alcance del MVP (no construir de más)
 Sí: bot de WhatsApp (FAQs, agendar, confirmar, reprogramar, cancelar), clasificación de
 intención, integración con Google Calendar, panel web mínimo con login (lista de
-leads/citas), recordatorio 24h antes, escalamiento a humano, registro de conversaciones
-y consentimiento.
+leads/citas), recordatorio diario (con la ventana descrita arriba), escalamiento a
+humano, registro de conversaciones y consentimiento, reporte semanal por correo.
 
 No todavía: CRM completo, seguimiento postconsulta, múltiples planes de precio, pagos
 integrados, expediente clínico, multiidioma, app móvil, microservicios. La visión de
 "panel inteligente" (insights automáticos, alertas, recomendaciones accionables) quedó
 documentada en el Excel (Backlog MVP B24-B25, Registro de Decisiones RD07) — Post-MVP
 a propósito, no construir antes de validar el piloto. El reporte semanal por correo
-(B26) es la excepción: sí se adelanta a F4-F5 por ser la pieza de mayor valor comercial
-ya identificada en el Business Case.
+(B26) ya está construido y probado — cálculo de métricas 100% real (conversaciones,
+% resuelto sin humano, citas, escalaciones), sin "horas ahorradas" inventadas (esa
+métrica es cualitativa, se recoge por encuesta directa al cierre del piloto, según el
+propio Excel — nunca calculada ni mostrada automáticamente).
 
 ## Convenciones
 - Componentes y funciones en inglés; textos de cara al usuario (UI, mensajes del bot) en
@@ -128,6 +160,11 @@ ya identificada en el Business Case.
 - Toda columna de fecha/hora usada en lógica real de tiempo (no solo registro histórico)
   debe declararse `timestamp(..., { withTimezone: true })` en el schema — sin esto, las
   comparaciones de fecha entre JS (UTC) y Postgres quedan ambiguas.
+- Cálculos de "día/semana en hora de Costa Rica" (recordatorios, reporte semanal) usan
+  el offset fijo UTC-6 a mano (`lib/reports/weekRange.ts`, `sendReminders.ts`) — Costa
+  Rica no observa horario de verano, así que no hace falta una librería de zonas
+  horarias para esto. Si el proyecto alguna vez opera en más de una zona horaria, esto
+  hay que revisitarlo.
 - Variables de entorno nuevas: usar `requireEnv()` de `lib/env.ts`, nunca
   `process.env.X!` a mano — así falla con un mensaje claro en vez de un `undefined`
   silencioso más adelante.
@@ -140,6 +177,16 @@ ya identificada en el Business Case.
   partir de la sesión.
 
 ## Notas técnicas / lecciones aprendidas (evitar repetir estos errores)
+- **Google OAuth: refresh token expira a los 7 días mientras la app esté en modo
+  "Testing" (no verificada).** Nos pasó el 9 de agosto de 2026, en medio de la primera
+  prueba end-to-end en producción — `invalid_grant: Token has been expired or revoked`.
+  Es una política de seguridad de Google para apps no verificadas, no un bug. Arreglo
+  temporal: reconectar manualmente vía `/api/auth/google/start` (dura otros 7 días).
+  **Arreglo real pendiente, primer punto de la próxima sesión**: investigar si el scope
+  de Calendar usado califica para publicar la OAuth consent screen (Testing → In
+  production) SIN pasar por el proceso completo de verificación de Google (que solo es
+  obligatorio para scopes "sensibles o restringidos") — si el scope actual no lo
+  requiere, publicar resolvería esto de forma permanente sin auditoría de seguridad.
 - **RLS activo ≠ política RLS escrita.** El 7 de agosto de 2026, las 7 tablas del panel
   tenían políticas de `SELECT` bien escritas pero RLS nunca se había activado a nivel de
   tabla (`ALTER TABLE ... ENABLE ROW LEVEL SECURITY` faltante) — resultado: con el
@@ -151,13 +198,19 @@ ya identificada en el Business Case.
   después de eso. Tablas creadas por migración de Drizzle no traen el `GRANT` por
   defecto (a diferencia de crearlas desde el Table Editor de Supabase) — si el panel
   tira `permission denied for table x (code 42501)`, falta el `GRANT`, no la política.
+- **Vercel Cron (plan Hobby) limita a 1 ejecución/día por cron, sin hora exacta** — ver
+  sección "Cron jobs" arriba. Diseñar cualquier feature nueva basada en cron asumiendo
+  esta granularidad, no una más fina, salvo que se pase a Vercel Pro.
+- **Next.js 16 renombró `middleware.ts` a `proxy.ts`** (y la función exportada de
+  `middleware` a `proxy`) — el nombre viejo sigue funcionando con warning, pero
+  Next.js señala intención de remover soporte a futuro. Ya migrado en este proyecto.
 - **Magic link (Supabase Auth) requiere una ruta de callback explícita**
   (`app/auth/callback/route.ts`) que intercambie el `?code=` por una sesión real vía
   `exchangeCodeForSession()` — el link del correo no autentica por sí solo.
-- **Middleware de Next.js usa `supabase.auth.getUser()`, no `getSession()`** — `getUser()`
-  valida el token contra el servidor de Supabase en cada request; `getSession()` confía
-  ciegamente en la cookie sin verificar. Para una capa de seguridad real, esa validación
-  importa.
+- **Middleware/proxy de Next.js usa `supabase.auth.getUser()`, no `getSession()`** —
+  `getUser()` valida el token contra el servidor de Supabase en cada request;
+  `getSession()` confía ciegamente en la cookie sin verificar. Para una capa de
+  seguridad real, esa validación importa.
 - **Clasificador de intención (`classify.ts`) escalaba saludos simples como
   `caso_especial`** por descarte — la regla de fail-safe ("ante la duda, escalar") no
   distinguía ambigüedad clínica de ambigüedad conversacional. Se resolvió con
@@ -166,6 +219,10 @@ ya identificada en el Business Case.
 - **Turbopack (Next.js 16.2.x) tiene una fuga de memoria conocida en sesiones de `next
   dev` largas** — corregida en 16.3 con "memory eviction". Mientras se siga en 16.2.x:
   reiniciar `npm run dev` cada 2-3 horas de trabajo activo en sesiones largas.
+- **Resend, mientras se use el dominio de pruebas (`onboarding@resend.dev`), solo
+  permite mandar correos a la dirección con la que te registraste** — no se le puede
+  mandar el reporte semanal a una clínica real hasta verificar un dominio propio en
+  resend.com/domains.
 - **Supabase + drizzle-kit**: el Transaction pooler (puerto 6543, usado en runtime vía
   `DATABASE_URL`) se cuelga con `drizzle-kit push`. Usar `DIRECT_DATABASE_URL` (Session
   pooler) solo para migraciones.
@@ -188,28 +245,40 @@ donde aplica (mismo patrón en cada proveedor: cuenta/organización propia de De
 mezclada con cuentas personales).
 
 - **GitHub**: repo privado `fabian-astorga/dentia`
+- **Vercel**: cuenta personal de Fabián (conectada vía GitHub), proyecto `dentia`,
+  team "DentIA" (plan Hobby). 2FA activo (TOTP). Producción: `dentia-tawny.vercel.app`.
+  Variables de entorno cargadas en "Production and Preview".
 - **Supabase**: organización "DentIA", proyecto `dentia-dev`
 - **Meta for Developers**: Business Portfolio "DentIA", app `DentIA Dev` (clínica de
   prueba original) + app `DentIA Dev - Clínica Sonrisas` (segunda clínica simulada,
   creada para probar aislamiento multi-tenant — **sin número de WhatsApp real propio**,
   Meta parece compartir un solo número de prueba por Business Portfolio; su fila en
   `whatsapp_integrations` usa un `phone_number_id` inventado, `TEST_SONRISAS_001`, solo
-  para pruebas simuladas vía `curl`, no recibe WhatsApp real). Token de acceso de la app
-  original generado vía System User (`dentia-bot`), válido 60 días desde su generación —
+  para pruebas simuladas vía `curl`, no recibe WhatsApp real). Webhook de `DentIA Dev`
+  actualizado el 9 de agosto de 2026 para apuntar a producción
+  (`https://dentia-tawny.vercel.app/api/whatsapp/webhook`) — ya NO depende de ngrok.
+  Token de acceso vía System User (`dentia-bot`), válido 60 días desde su generación —
   **revisar fecha de expiración periódicamente**, no hay alerta automática todavía.
 - **Anthropic Console**: cuenta `dentia.cr@gmail.com`, API key activa con crédito cargado
 - **Google Cloud**: proyecto `DentIA Dev` bajo `dentia.cr@gmail.com`. OAuth consent
   screen en modo "Prueba" (no verificado por Google todavía — límite de 100 test users,
-  actualmente 2 agregados). Calendario de prueba: uno dedicado llamado "DentIA" dentro
+  actualmente 2 agregados; **refresh tokens expiran a los 7 días por esta razón, ver
+  Notas técnicas**). Redirect URI de producción agregado el 9 de agosto de 2026
+  (`https://dentia-tawny.vercel.app/api/auth/google/callback`), además del de
+  localhost (ambos activos). Calendario de prueba: uno dedicado llamado "DentIA" dentro
   de la cuenta de prueba, guardado como `google_calendar_id: primary` en
   `calendar_integrations` (es el calendario principal de esa cuenta, solo renombrado).
-- **Vercel**: cuenta creada, proyecto aún no conectado/desplegado.
+- **Resend**: cuenta `dentia.cr@gmail.com`, plan gratuito (3,000 correos/mes). Usando
+  el dominio de pruebas (`onboarding@resend.dev`) — **pendiente verificar dominio
+  propio** antes de poder mandarle el reporte semanal a una clínica real (ver Notas
+  técnicas).
 
 ## Estado actual del proyecto
-Circuito funcionando de punta a punta en local (probado con WhatsApp real):
+**En producción real** (`dentia-tawny.vercel.app`), circuito funcionando de punta a
+punta, probado con WhatsApp real contra producción el 9 de agosto de 2026:
 
 ```
-WhatsApp → Meta → webhook → resuelve clinic_id por phone_number_id → Claude clasifica
+WhatsApp → Meta → webhook (Vercel) → resuelve clinic_id por phone_number_id → Claude
                                                                           ↓
                               ¿saludo? → respuesta directa (sin IA, isGreeting.ts)
                               ¿agendar? → extrae fecha/motivo → Google Calendar real
@@ -220,43 +289,43 @@ WhatsApp → Meta → webhook → resuelve clinic_id por phone_number_id → Cla
 ```
 
 Completado:
-- Webhook de WhatsApp (recepción + verificación de Meta)
-- **Resolución dinámica de clínica por `phone_number_id`** — ya no depende de
-  `DEV_CLINIC_ID` hardcodeado; probado con una segunda clínica simulada, aislamiento
-  multi-tenant confirmado a nivel de webhook/base de datos
-- Clasificación de intención con Claude (`faq` / `agendar_cita` / `caso_especial`),
-  fail-safe hacia `caso_especial` si algo falla al parsear
-- **Detección determinística de saludos** (`isGreeting.ts`) — evita que un simple "hola"
-  se escale por error como caso especial, sin gastar una llamada a Claude
-- Flujo completo de agendar cita con memoria conversacional (`conversations.context`
-  como máquina de estados: `collecting_date` → `awaiting_slot_selection` → cierre)
-- Reprogramar y cancelar citas (con confirmación explícita para cancelar, y
-  desambiguación cuando el paciente tiene varias citas activas)
-- Integración real con Google Calendar (OAuth, lectura de disponibilidad, creación,
-  edición y borrado de eventos)
-- Sistema de tono de respuestas (`generateReply.ts`) — el código decide QUÉ pasó,
-  Claude redacta CÓMO decirlo, con fallback a mensaje genérico si Claude falla
-- Notificación real al staff en `caso_especial` (WhatsApp + registro en `escalations`)
-- Recordatorio 24h antes (`/api/cron/send-reminders`, protegido con `CRON_SECRET`,
-  disparado manualmente por ahora — falta programarlo en Vercel Cron cuando se despliegue)
-- **Login del panel con Supabase Auth (magic link)** — `middleware.ts` protege
-  `/panel/*`, RLS activo y verificado en las 7 tablas relevantes, queries del panel
-  migradas a `lib/supabase/queries/` (cliente autenticado, sin `clinicId` manual)
-- Panel visual (`/panel`) — inbox de conversaciones, ahora CON login y aislamiento
-  real por clínica. Paleta: navy `#1F3B57`, teal `#0E7C7B`, coral `#D85A30`.
-  Tipografía: Bevan (wordmark/títulos) + Inter (todo lo funcional/denso)
+- Webhook de WhatsApp (recepción + verificación de Meta) — **en producción**
+- Resolución dinámica de clínica por `phone_number_id` — probado con una segunda
+  clínica simulada, aislamiento multi-tenant confirmado
+- Clasificación de intención con Claude, fail-safe hacia `caso_especial` si algo falla
+- Detección determinística de saludos (`isGreeting.ts`)
+- Flujo completo de agendar, reprogramar y cancelar citas con memoria conversacional
+- Integración real con Google Calendar (con la limitación de refresh token de 7 días
+  mientras la app no esté publicada — ver Notas técnicas)
+- Sistema de tono de respuestas (`generateReply.ts`)
+- Notificación real al staff en `caso_especial`
+- **Recordatorio diario vía Vercel Cron** (ya no manual) — ventana de día completo
+- **Reporte semanal por correo vía Vercel Cron** (ya no manual) — métricas reales,
+  probado con un envío real recibido
+- **Login del panel con Supabase Auth (magic link)**, RLS activo y verificado,
+  middleware/proxy protegiendo `/panel/*`
+- **Deploy a Vercel completo**: variables de entorno migradas, cron jobs configurados,
+  webhook de Meta y redirect de Google actualizados a producción
 
-Pendiente (en orden sugerido, sin urgencia crítica salvo que se indique):
-- Deploy a Vercel + configurar Vercel Cron para los recordatorios
-- Borrar `/api/google/test` cuando ya no se necesite para debug
-- Fusionar `classify.ts` y `extractDate.ts` en una sola llamada a Claude (optimización
-  de costo/latencia, no urgente)
-- Reporte semanal por correo a la clínica (B26 del Excel — próximo candidato lógico
-  después del panel, alto valor comercial ya identificado)
-- Evaluar eliminar `DEV_CLINIC_ID`/`config.ts` si no queda ningún uso real
+Pendiente (en orden sugerido):
+1. **Investigar publicar la OAuth consent screen de Google** para que el refresh token
+   no expire cada 7 días — confirmar primero si el scope de Calendar usado requiere el
+   proceso completo de verificación o no.
+2. Verificar dominio propio en Resend (para mandarle el reporte semanal a clínicas
+   reales, no solo a Fabián)
+3. Considerar dominio propio para la app (`dentia.cr` o similar) en vez del subdominio
+   gratuito de Vercel
+4. Fusionar `classify.ts` + `interpretSchedulingIntent.ts` en una sola llamada a Claude
+   (identificado como la redundancia real — no `extractDate.ts` como se pensó al
+   principio; pausado el 9 de agosto de 2026 por ser un cambio de riesgo real sobre el
+   flujo de agendar ya probado — hacer con sesión fresca y margen completo)
+5. Actualizar el Excel (`DentIA_-_Action_Plan___Roadmap.xlsx`) con todo el trabajo de
+   esta sesión — quedó pendiente a propósito, priorizando avanzar con código
+6. Evaluar eliminar `DEV_CLINIC_ID`/`config.ts` si no queda ningún uso real
 
 ## Fuente de verdad
 El roadmap completo, backlog y decisiones viven en `DentIA_-_Action_Plan___Roadmap.xlsx`
-(compartido con Daniel). Este archivo (`CLAUDE.md`) es el resumen técnico operativo —
-si hay conflicto entre ambos, el Excel manda para negocio/prioridad, este archivo manda
-para reglas de arquitectura.
+(compartido con Daniel) — **desactualizado respecto al código real, ver pendiente #5**.
+Este archivo (`CLAUDE.md`) es el resumen técnico operativo — si hay conflicto entre
+ambos, el Excel manda para negocio/prioridad, este archivo manda para reglas de
+arquitectura.
