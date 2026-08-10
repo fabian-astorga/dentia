@@ -4,7 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 // Protege todo lo que vive bajo /panel — exige sesión activa antes de
 // renderizar. La excepción es /panel/login, que necesita ser accesible
 // sin sesión (si no, nadie podría loguearse nunca).
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
