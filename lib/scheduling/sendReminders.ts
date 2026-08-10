@@ -5,12 +5,38 @@ import { findOrCreateConversation } from "@/lib/db/queries/conversations";
 import { insertMessage } from "@/lib/db/queries/messages";
 import { formatDateTimeForHuman } from "./format";
 
-const REMINDER_WINDOW_HOURS = 1; // busca citas entre 23h y 25h desde ahora
+// Costa Rica no observa horario de verano — mismo criterio que
+// lib/reports/weekRange.ts.
+const COSTA_RICA_UTC_OFFSET_HOURS = -6;
+
+// Con el cron de Vercel corriendo una sola vez al día (límite del plan
+// Hobby — ver vercel.json), no podemos depender de una ventana angosta
+// alrededor de "exactamente 24h": con una sola corrida diaria, eso
+// dejaría sin recordatorio a cualquier cita fuera de esa franja
+// estrecha. En su lugar, cada corrida cubre el día calendario de
+// mañana completo (hora de Costa Rica) — así toda cita de mañana recibe
+// su recordatorio, aunque llegue en algún punto entre ~16 y ~33 horas
+// antes según la hora de la cita, no exactamente a las 24h.
+function getTomorrowRangeInCostaRica(referenceDate: Date = new Date()) {
+  const crNow = new Date(referenceDate.getTime() + COSTA_RICA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+
+  const crTodayMidnight = new Date(crNow);
+  crTodayMidnight.setUTCHours(0, 0, 0, 0);
+
+  const crTomorrowMidnight = new Date(crTodayMidnight);
+  crTomorrowMidnight.setUTCDate(crTomorrowMidnight.getUTCDate() + 1);
+
+  const crDayAfterMidnight = new Date(crTomorrowMidnight);
+  crDayAfterMidnight.setUTCDate(crDayAfterMidnight.getUTCDate() + 1);
+
+  const windowStart = new Date(crTomorrowMidnight.getTime() - COSTA_RICA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  const windowEnd = new Date(crDayAfterMidnight.getTime() - COSTA_RICA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+
+  return { windowStart, windowEnd };
+}
 
 export async function sendUpcomingReminders() {
-  const now = new Date();
-  const windowStart = new Date(now.getTime() + (24 - REMINDER_WINDOW_HOURS) * 60 * 60 * 1000);
-  const windowEnd = new Date(now.getTime() + (24 + REMINDER_WINDOW_HOURS) * 60 * 60 * 1000);
+  const { windowStart, windowEnd } = getTomorrowRangeInCostaRica();
 
   const dueAppointments = await getAppointmentsNeedingReminder(windowStart, windowEnd);
 
