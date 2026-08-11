@@ -6,6 +6,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 export type ReplySituation =
   | "greeting"
   | "flow_exited"
+  | "off_topic_during_flow"
   | "ask_date"
   | "offer_slots"
   | "booking_confirmed"
@@ -17,12 +18,16 @@ export type ReplySituation =
 
 interface GenerateReplyInput {
   situation: ReplySituation;
-  facts: Record<string, string>; // datos exactos que DEBEN aparecer tal cual en la respuesta
+  facts: Record<string, string>;
 }
 
 const SITUATION_GUIDANCE: Record<ReplySituation, string> = {
   greeting:
     "El paciente solo saludó, sin pedir nada específico todavía. Saludalo con calidez y contale brevemente que podés ayudarlo a agendar, reprogramar o cancelar una cita.",
+  flow_exited:
+    "El paciente decidió no seguir con lo que estaba haciendo (agendar, reprogramar o cancelar una cita). Respondé con calidez, sin insistir ni preguntar por qué, dejando claro que podés ayudarlo cuando quiera retomarlo.",
+  off_topic_during_flow:
+    "El paciente hizo una pregunta distinta mientras estabas en medio de agendar/reprogramar una cita con él. Reconocé con calidez que parece otra pregunta, decile que todavía estás aprendiendo a resolver esas dudas directamente pero que puede llamar a la clínica, y recordale amablemente que cuando quiera seguir con la cita, te diga el dato que le habías pedido.",
   ask_date: "El paciente quiere agendar o mover una cita. Preguntale con calidez qué día le queda mejor.",
   offer_slots:
     "Vas a ofrecer los horarios disponibles listados en los datos. Sé claro y organizado, pero natural — no como una lista robótica.",
@@ -36,8 +41,6 @@ const SITUATION_GUIDANCE: Record<ReplySituation, string> = {
     "Este mensaje puede involucrar dolor, urgencia o algo que requiere atención humana. Respondé con calma y empatía genuina, sin minimizar ni alarmar, dejando claro que vas a poner en contacto directo con la clínica lo antes posible.",
   faq_placeholder:
     "Respondé con calidez que todavía estás aprendiendo a resolver preguntas frecuentes, pero que pronto vas a poder ayudar con horarios, precios y ubicación.",
-  flow_exited:
-    "El paciente decidió no seguir con lo que estaba haciendo (agendar, reprogramar o cancelar una cita). Respondé con calidez, sin insistir ni preguntar por qué, dejando claro que podés ayudarlo cuando quiera retomarlo."
 };
 
 const SYSTEM_PROMPT = `Sos DentIA, el asistente de WhatsApp de una clínica dental en Costa Rica.
@@ -80,8 +83,6 @@ export async function generateReply(input: GenerateReplyInput): Promise<string> 
     const textBlock = response.content.find((b) => b.type === "text");
     return textBlock?.text?.trim() || FALLBACK_MESSAGE;
   } catch (err) {
-    // Fail-safe: si Claude falla por cualquier motivo, el paciente igual
-    // recibe una respuesta, aunque sea genérica — nunca dejarlo sin nada.
     console.error("generateReply failed, using fallback:", err);
     return FALLBACK_MESSAGE;
   }

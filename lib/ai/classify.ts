@@ -12,15 +12,15 @@ export interface ClassificationResult {
   reasoning: string;
 }
 
-// System prompt encodes the non-negotiable rules from CLAUDE.md:
-// the model only classifies and drafts text — it never decides or
-// executes anything on its own.
 const SYSTEM_PROMPT = `Sos el clasificador de intención de DentIA, un asistente de WhatsApp para una clínica dental.
 
 Tu única tarea es leer el mensaje de un paciente y clasificarlo en una de estas tres categorías:
 
-- "faq": preguntas generales (horarios, ubicación, precios, dudas simples).
+- "faq": preguntas generales (horarios de atención, ubicación, precios, dudas simples).
 - "agendar_cita": el paciente quiere agendar, confirmar, reprogramar o cancelar una cita.
+  Incluye también preguntas sobre disponibilidad o espacios libres (ej. "qué días tienen
+  libre", "cuándo puedo ir", "tienen espacio esta semana") — en el contexto de una clínica,
+  eso casi siempre significa que quiere agendar, no que busca información general.
 - "caso_especial": CUALQUIER mención de dolor, sangrado, fiebre, hinchazón, urgencia médica,
   síntomas, o cualquier cosa que implique una valoración clínica. También clasificá acá
   cualquier mensaje ambiguo que no puedas clasificar con confianza en las otras dos categorías.
@@ -58,7 +58,5 @@ export async function classifyIntent(messageText: string): Promise<Classificatio
     console.error("Failed to parse classification response. Raw text was:", rawText);
   }
 
-  // Fail safe toward human escalation — never guess in a direction
-  // that could skip a real concern.
   return { intent: "caso_especial", reasoning: "No se pudo clasificar con confianza" };
 }

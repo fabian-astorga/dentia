@@ -39,10 +39,10 @@ export async function handleIncomingMessage(
   let detectedIntent: DetectedIntent;
 
   if (isMidScheduling) {
-    const result = await handleSchedulingTurn(clinicId, fromPhone, messageText, context);
+    const result = await handleSchedulingTurn(clinicId, fromPhone, messageText, context, conversation.id);
     replyText = result.replyText;
     await updateConversationContext(conversation.id, result.newContext);
-    detectedIntent = "agendar_cita";
+    detectedIntent = result.escalated ? "caso_especial" : "agendar_cita";
   } else if (isGreeting(messageText)) {
     replyText = await generateReply({ situation: "greeting", facts: {} });
     detectedIntent = "saludo";
@@ -51,9 +51,10 @@ export async function handleIncomingMessage(
     detectedIntent = classification.intent;
 
     if (classification.intent === "agendar_cita") {
-      const result = await handleSchedulingTurn(clinicId, fromPhone, messageText, {});
+      const result = await handleSchedulingTurn(clinicId, fromPhone, messageText, {}, conversation.id);
       replyText = result.replyText;
       await updateConversationContext(conversation.id, result.newContext);
+      if (result.escalated) detectedIntent = "caso_especial";
     } else if (classification.intent === "faq") {
       replyText = await generateReply({ situation: "faq_placeholder", facts: {} });
     } else {

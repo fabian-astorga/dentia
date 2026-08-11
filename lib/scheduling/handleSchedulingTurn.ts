@@ -8,6 +8,7 @@ import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "@
 import { matchSlotSelection } from "./matchSlotSelection";
 import { isAffirmative } from "./isAffirmative";
 import { isDecline } from "./isDecline";
+import { isMedicalConcern } from "./isMedicalConcern";
 import { formatTimeForHuman, formatDateTimeForHuman, formatDateLabel } from "./format";
 import {
   insertAppointment,
@@ -18,6 +19,9 @@ import {
 } from "@/lib/db/queries/appointments";
 import { findOrCreatePatient } from "@/lib/db/queries/patients";
 import type { TimeSlot } from "@/lib/google/availability";
+import { looksLikeQuestion } from "./looksLikeQuestion";
+import { notifyStaffOfEscalation } from "@/lib/notifications/notifyStaff";
+import { insertEscalation } from "@/lib/db/queries/escalations";
 
 export interface SchedulingContext {
   step?:
@@ -36,6 +40,7 @@ export interface SchedulingContext {
 interface SchedulingResult {
   replyText: string;
   newContext: SchedulingContext;
+  escalated?: boolean;
 }
 
 function resolveDuration(reason: string | null): number {
@@ -104,9 +109,29 @@ export async function handleSchedulingTurn(
   clinicId: string,
   phone: string,
   messageText: string,
-  context: SchedulingContext
+  context: SchedulingContext,
+  conversationId: string
 ): Promise<SchedulingResult> {
   const todayISO = new Date().toISOString().slice(0, 10);
+
+  // Máxima prioridad, sin excepciones de paso — Regla #2 de CLAUDE.md:
+  // ante cualquier mención de dolor/sangrado/fiebre/urgencia, escalar
+  // siempre, sin importar en qué punto de la conversación esté el
+  // paciente. classifyIntent detecta esto en el primer mensaje, pero
+  // nunca vuelve a correr una vez que el flujo de agenda arrancó — este
+  // chequeo cubre ese hueco. Va ANTES que isDecline a propósito: un
+  // mensaje puede sonar como abandono y ser en realidad una urgencia
+  // ("ya no puedo más, me duele mucho").
+  if (isMedicalConcern(messageText)) {
+    await notifyStaffOfEscalation({ clinicId, patientPhone: phone, messageText });
+    await insertEscalation({
+      conversationId,
+      clinicId,
+      reason: "Mención de posible urgencia médica durante el flujo de agenda",
+    });
+    const replyText = await generateReply({ situation: "escalation", facts: {} });
+    return { replyText, newContext: {}, escalated: true };
+  }
 
   // Salida determinística de cualquier punto del flujo — evita el loop
   // de "no logré identificar X" repetido indefinidamente si el paciente
@@ -165,6 +190,10 @@ export async function handleSchedulingTurn(
     const chosen = matchSlotSelection(messageText, context.offeredSlots);
 
     if (!chosen) {
+      if (looksLikeQuestion(messageText)) {
+        const replyText = await generateReply({ situation: "off_topic_during_flow", facts: {} });
+        return { replyText, newContext: context };
+      }
       return {
         replyText: `No logré identificar cuál horario elegiste. Las opciones eran: ${context.offeredSlots
           .map((s) => formatTimeForHuman(new Date(s.start)))
@@ -217,6 +246,10 @@ export async function handleSchedulingTurn(
     const reason = extraction.reason ?? context.reason ?? null;
 
     if (!extraction.date) {
+      if (looksLikeQuestion(messageText)) {
+        const replyText = await generateReply({ situation: "off_topic_during_flow", facts: {} });
+        return { replyText, newContext: context };
+      }
       return { replyText: "No logré entender la fecha. ¿Podés decirme el día de nuevo?", newContext: context };
     }
 
