@@ -1,4 +1,4 @@
-import { DEFAULT_APPOINTMENT_DURATION_MINUTES, APPOINTMENT_DURATION_BY_REASON } from "./constants";
+import { DEFAULT_APPOINTMENT_DURATION_MINUTES } from "./constants";
 import { extractDateAndReason } from "@/lib/ai/extractDate";
 import { interpretSchedulingIntent } from "@/lib/ai/interpretSchedulingIntent";
 import { generateReply } from "@/lib/ai/generateReply";
@@ -18,6 +18,7 @@ import {
   rescheduleAppointmentRecord,
 } from "@/lib/db/queries/appointments";
 import { findOrCreatePatient } from "@/lib/db/queries/patients";
+import { getClinicSchedulingConfig } from "@/lib/db/queries/clinics";
 import type { TimeSlot } from "@/lib/google/availability";
 import { looksLikeQuestion } from "./looksLikeQuestion";
 import { notifyStaffOfEscalation } from "@/lib/notifications/notifyStaff";
@@ -43,9 +44,9 @@ interface SchedulingResult {
   escalated?: boolean;
 }
 
-function resolveDuration(reason: string | null): number {
+function resolveDuration(reason: string | null, durationByReason: Record<string, number>): number {
   if (!reason) return DEFAULT_APPOINTMENT_DURATION_MINUTES;
-  return APPOINTMENT_DURATION_BY_REASON[reason.toLowerCase()] ?? DEFAULT_APPOINTMENT_DURATION_MINUTES;
+  return durationByReason[reason.toLowerCase()] ?? DEFAULT_APPOINTMENT_DURATION_MINUTES;
 }
 
 async function offerSlotsForDate(
@@ -55,8 +56,9 @@ async function offerSlotsForDate(
   action: "book" | "reschedule",
   appointmentId: string | undefined
 ): Promise<SchedulingResult> {
-  const durationMinutes = resolveDuration(reason);
-  const slots = await getAvailableSlots(clinicId, date, durationMinutes);
+  const { businessHours, appointmentDurationByReason } = await getClinicSchedulingConfig(clinicId);
+  const durationMinutes = resolveDuration(reason, appointmentDurationByReason);
+  const slots = await getAvailableSlots(clinicId, date, durationMinutes, businessHours);
 
   if (slots.length === 0) {
     return {
@@ -114,14 +116,6 @@ export async function handleSchedulingTurn(
 ): Promise<SchedulingResult> {
   const todayISO = new Date().toISOString().slice(0, 10);
 
-  // Máxima prioridad, sin excepciones de paso — Regla #2 de CLAUDE.md:
-  // ante cualquier mención de dolor/sangrado/fiebre/urgencia, escalar
-  // siempre, sin importar en qué punto de la conversación esté el
-  // paciente. classifyIntent detecta esto en el primer mensaje, pero
-  // nunca vuelve a correr una vez que el flujo de agenda arrancó — este
-  // chequeo cubre ese hueco. Va ANTES que isDecline a propósito: un
-  // mensaje puede sonar como abandono y ser en realidad una urgencia
-  // ("ya no puedo más, me duele mucho").
   if (isMedicalConcern(messageText)) {
     await notifyStaffOfEscalation({ clinicId, patientPhone: phone, messageText });
     await insertEscalation({
@@ -133,11 +127,6 @@ export async function handleSchedulingTurn(
     return { replyText, newContext: {}, escalated: true };
   }
 
-  // Salida determinística de cualquier punto del flujo — evita el loop
-  // de "no logré identificar X" repetido indefinidamente si el paciente
-  // decide abandonar. Se excluye confirming_cancellation porque ese
-  // paso ya maneja sí/no explícito con isAffirmative, y ahí un "no"
-  // significa "no cancelar", no "salir de la conversación".
   if (context.step !== "confirming_cancellation" && isDecline(messageText)) {
     const replyText = await generateReply({ situation: "flow_exited", facts: {} });
     return { replyText, newContext: {} };
