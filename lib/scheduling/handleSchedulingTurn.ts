@@ -44,9 +44,23 @@ interface SchedulingResult {
   escalated?: boolean;
 }
 
+// Normaliza texto en español para comparaciones tolerantes a tildes —
+// mismo criterio usado en isAffirmative.ts. "extracción" y "extraccion"
+// deben matchear igual, sin importar cómo se cargó el motivo en
+// clinics.config ni cómo lo escribió el paciente.
+function stripAccents(text: string): string {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
 function resolveDuration(reason: string | null, durationByReason: Record<string, number>): number {
   if (!reason) return DEFAULT_APPOINTMENT_DURATION_MINUTES;
-  return durationByReason[reason.toLowerCase()] ?? DEFAULT_APPOINTMENT_DURATION_MINUTES;
+  const normalizedReason = stripAccents(reason.toLowerCase());
+
+  const match = Object.entries(durationByReason).find(
+    ([key]) => stripAccents(key.toLowerCase()) === normalizedReason
+  );
+
+  return match?.[1] ?? DEFAULT_APPOINTMENT_DURATION_MINUTES;
 }
 
 async function offerSlotsForDate(
