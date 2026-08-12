@@ -12,6 +12,8 @@ import { handleSchedulingTurn, type SchedulingContext } from "@/lib/scheduling/h
 import { generateReply } from "@/lib/ai/generateReply";
 import { notifyStaffOfEscalation } from "@/lib/notifications/notifyStaff";
 import { insertEscalation } from "@/lib/db/queries/escalations";
+import { getClinicSchedulingConfig } from "@/lib/db/queries/clinics";
+import { isWithinBusinessHours, formatOpeningTime } from "@/lib/scheduling/isWithinBusinessHours";
 
 export async function handleIncomingMessage(
   clinicId: string,
@@ -68,7 +70,14 @@ export async function handleIncomingMessage(
         clinicId,
         reason: "Mensaje clasificado como caso especial",
       });
-      replyText = await generateReply({ situation: "escalation", facts: {} });
+
+      const { businessHours } = await getClinicSchedulingConfig(clinicId);
+      const withinHours = isWithinBusinessHours(businessHours);
+
+      replyText = await generateReply({
+        situation: withinHours ? "escalation" : "escalation_after_hours",
+        facts: withinHours ? {} : { hora_de_apertura: formatOpeningTime(businessHours) },
+      });
     }
   }
 

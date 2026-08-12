@@ -23,6 +23,7 @@ import type { TimeSlot } from "@/lib/google/availability";
 import { looksLikeQuestion } from "./looksLikeQuestion";
 import { notifyStaffOfEscalation } from "@/lib/notifications/notifyStaff";
 import { insertEscalation } from "@/lib/db/queries/escalations";
+import { isWithinBusinessHours, formatOpeningTime } from "./isWithinBusinessHours";
 
 export interface SchedulingContext {
   step?:
@@ -137,7 +138,14 @@ export async function handleSchedulingTurn(
       clinicId,
       reason: "Mención de posible urgencia médica durante el flujo de agenda",
     });
-    const replyText = await generateReply({ situation: "escalation", facts: {} });
+
+    const { businessHours } = await getClinicSchedulingConfig(clinicId);
+    const withinHours = isWithinBusinessHours(businessHours);
+
+    const replyText = await generateReply({
+      situation: withinHours ? "escalation" : "escalation_after_hours",
+      facts: withinHours ? {} : { hora_de_apertura: formatOpeningTime(businessHours) },
+    });
     return { replyText, newContext: {}, escalated: true };
   }
 

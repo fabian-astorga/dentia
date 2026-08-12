@@ -14,6 +14,7 @@ export type ReplySituation =
   | "cancellation_confirmed"
   | "cancellation_declined"
   | "escalation"
+  | "escalation_after_hours"
   | "faq_placeholder";
 
 interface GenerateReplyInput {
@@ -41,6 +42,8 @@ const SITUATION_GUIDANCE: Record<ReplySituation, string> = {
     "Este mensaje puede involucrar dolor, urgencia o algo que requiere atención humana. Respondé con calma y empatía genuina, sin minimizar ni alarmar, dejando claro que vas a poner en contacto directo con la clínica lo antes posible.",
   faq_placeholder:
     "Respondé con calidez que todavía estás aprendiendo a resolver preguntas frecuentes, pero que pronto vas a poder ayudar con horarios, precios y ubicación.",
+  escalation_after_hours:
+    "Este mensaje puede involucrar dolor, urgencia o algo que requiere atención humana, pero la clínica está cerrada en este momento. Respondé con calma y empatía genuina, sin minimizar. Explicá honestamente que la clínica está cerrada ahora y que van a contactarlo apenas abra (usá la hora exacta que te dieron en los datos). Si suena a algo que no puede esperar, recomendale ir a una sala de emergencias — sin diagnosticar ni decirle qué tan grave es.",
 };
 
 const SYSTEM_PROMPT = `Sos DentIA, el asistente de WhatsApp de una clínica dental en Costa Rica.
