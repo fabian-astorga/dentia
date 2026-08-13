@@ -1,23 +1,16 @@
 import type { TimeSlot } from "@/lib/google/availability";
-
-// Costa Rica no observa horario de verano — mismo offset fijo usado en
-// lib/reports/weekRange.ts y sendReminders.ts.
-const COSTA_RICA_UTC_OFFSET_HOURS = -6;
-
-// IMPORTANTE: nunca usar Date.getHours()/getMinutes() acá — eso lee la
-// zona horaria del SERVIDOR (Costa Rica en local, UTC en Vercel), no la
-// de Costa Rica. En producción esto causó que "4pm" matcheara por
-// casualidad matemática con el slot de las 10am (el offset de 6 horas
-// hizo colisionar ambos valores). Siempre convertir explícito.
-function getCostaRicaHourAndMinute(isoString: string): { hour: number; minute: number } {
-  const utcDate = new Date(isoString);
-  const crDate = new Date(utcDate.getTime() + COSTA_RICA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
-  return { hour: crDate.getUTCHours(), minute: crDate.getUTCMinutes() };
-}
+import { getCostaRicaHourAndMinute } from "./timezone";
 
 // Interpretación determinística (sin IA) de cuál horario eligió el
 // paciente — más confiable y más barato que pedirle a Claude que
 // "adivine" contra una lista que ya tenemos en código.
+//
+// IMPORTANTE: la comparación usa getCostaRicaHourAndMinute (ver
+// timezone.ts) — nunca Date.getHours()/getMinutes() directo, eso lee
+// la zona horaria del SERVIDOR (Costa Rica en local, UTC en Vercel).
+// En producción esto causó que "4pm" matcheara por casualidad
+// matemática con el slot de las 10am (el offset de 6 horas hizo
+// colisionar ambos valores).
 export function matchSlotSelection(messageText: string, slots: TimeSlot[]): TimeSlot | null {
   const normalized = messageText.toLowerCase().replace(/\s/g, "");
   const match = normalized.match(/(\d{1,2})(:(\d{2}))?\s*(am|pm)?/);

@@ -4,10 +4,7 @@ import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
 import { findOrCreateConversation } from "@/lib/db/queries/conversations";
 import { insertMessage } from "@/lib/db/queries/messages";
 import { formatDateTimeForHuman } from "./format";
-
-// Costa Rica no observa horario de verano — mismo criterio que
-// lib/reports/weekRange.ts.
-const COSTA_RICA_UTC_OFFSET_HOURS = -6;
+import { getCostaRicaMidnightUTC } from "./timezone";
 
 // Con el cron de Vercel corriendo una sola vez al día (límite del plan
 // Hobby — ver vercel.json), no podemos depender de una ventana angosta
@@ -18,19 +15,13 @@ const COSTA_RICA_UTC_OFFSET_HOURS = -6;
 // su recordatorio, aunque llegue en algún punto entre ~16 y ~33 horas
 // antes según la hora de la cita, no exactamente a las 24h.
 function getTomorrowRangeInCostaRica(referenceDate: Date = new Date()) {
-  const crNow = new Date(referenceDate.getTime() + COSTA_RICA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  const crTodayMidnightUTC = getCostaRicaMidnightUTC(referenceDate);
 
-  const crTodayMidnight = new Date(crNow);
-  crTodayMidnight.setUTCHours(0, 0, 0, 0);
+  const windowStart = new Date(crTodayMidnightUTC);
+  windowStart.setUTCDate(windowStart.getUTCDate() + 1);
 
-  const crTomorrowMidnight = new Date(crTodayMidnight);
-  crTomorrowMidnight.setUTCDate(crTomorrowMidnight.getUTCDate() + 1);
-
-  const crDayAfterMidnight = new Date(crTomorrowMidnight);
-  crDayAfterMidnight.setUTCDate(crDayAfterMidnight.getUTCDate() + 1);
-
-  const windowStart = new Date(crTomorrowMidnight.getTime() - COSTA_RICA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
-  const windowEnd = new Date(crDayAfterMidnight.getTime() - COSTA_RICA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  const windowEnd = new Date(windowStart);
+  windowEnd.setUTCDate(windowEnd.getUTCDate() + 1);
 
   return { windowStart, windowEnd };
 }

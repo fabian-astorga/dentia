@@ -1,13 +1,5 @@
 import type { BusinessHours } from "@/lib/db/queries/clinics";
-
-// Costa Rica no observa horario de verano — mismo offset fijo usado en
-// weekRange.ts, sendReminders.ts y matchSlotSelection.ts.
-const COSTA_RICA_UTC_OFFSET_HOURS = -6;
-
-function getCurrentCostaRicaHour(referenceDate: Date = new Date()): number {
-  const crDate = new Date(referenceDate.getTime() + COSTA_RICA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
-  return crDate.getUTCHours();
-}
+import { getCurrentCostaRicaHour } from "./timezone";
 
 export function isWithinBusinessHours(businessHours: BusinessHours): boolean {
   const currentHour = getCurrentCostaRicaHour();
