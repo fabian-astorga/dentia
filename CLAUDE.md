@@ -50,16 +50,23 @@ proxy.ts                        → protege /panel/*, redirige a /panel/login si
                   availability.ts (recibe businessHours como parámetro — YA NO es un
                   valor global, ver "Configuración por clínica"), constants.ts
   /scheduling   → handleSchedulingTurn.ts (máquina de estados — ver orden de chequeos
-                  en Notas técnicas), matchSlotSelection.ts (timezone-safe, ver Notas
-                  técnicas), matchAppointmentByText.ts, isAffirmative.ts (match por
+                  en Notas técnicas), timezone.ts (ÚNICA fuente de verdad para el
+                  offset de Costa Rica y la conversión UTC↔hora-de-pared — ver Notas
+                  técnicas, bugs #2 y #7; todo lo demás en esta carpeta importa de
+                  acá, no duplicar el offset en un archivo nuevo),
+                  matchSlotSelection.ts (timezone-safe vía timezone.ts, ver Notas
+                  técnicas), matchAppointmentByText.ts (timezone-safe vía
+                  timezone.ts, y con ancla explícita de hora en `parseTimeFromText`
+                  — ver Notas técnicas, bugs #7 y #8), isAffirmative.ts (match por
                   frase completa, no substring — ver Notas técnicas), isDecline.ts
                   (salida determinística del flujo), isMedicalConcern.ts (escalación
                   médica en cualquier paso, máxima prioridad), looksLikeQuestion.ts
                   (detecta cambio de tema en medio del flujo),
                   isWithinBusinessHours.ts (compara hora actual CR contra
-                  businessHours de la clínica), format.ts, sendReminders.ts (ventana
-                  de día completo, cron 1x/día), constants.ts (ahora son DEFAULTS,
-                  ver "Configuración por clínica")
+                  businessHours de la clínica, vía timezone.ts), format.ts,
+                  sendReminders.ts (ventana de día completo, cron 1x/día, vía
+                  timezone.ts), constants.ts (ahora son DEFAULTS, ver
+                  "Configuración por clínica")
   /notifications → notifyStaff.ts
   /reports      → weekRange.ts — getPreviousWeekRange(), cálculo de semana en hora CR
   /email
@@ -215,6 +222,37 @@ Además, un bug de **tildes** en `resolveDuration` (`handleSchedulingTurn.ts`):
 tilde) en la tabla de duraciones, cayendo silenciosamente en el default de 30 min en vez
 de los 45 correctos. Mismo arreglo de `stripAccents` en ambos lados de la comparación.
 
+**Continuación — probando Categoría 6 (múltiples citas activas simultáneas), 13 de
+agosto 2026.** Dos bugs más, misma familia que el #2 (viola Regla #5: nunca
+cancelar/reprogramar sin confirmación real sobre la cita correcta):
+
+7. **`matchAppointmentByText.ts` comparaba hora de pared CR (lo que escribió el
+   paciente) contra `scheduledAt.getUTCHours()`/`getUTCMinutes()` crudos (UTC, sin
+   convertir)** — a diferencia del bug #2, acá no fallaba con un `null` inofensivo:
+   con dos citas el mismo día a las 9am y 3pm CR, "la de las 3pm" (hour: 15) matcheaba
+   por coincidencia numérica la cita de las 9am (guardada como 15:00 UTC), devolviendo
+   la cita EQUIVOCADA con confianza total (`refined.length === 1`), lista para
+   cancelar/reprogramar. Arreglo: extraído `lib/scheduling/timezone.ts` como única
+   fuente de verdad del offset de CR (antes copiado 3 veces: `matchSlotSelection.ts`,
+   `isWithinBusinessHours.ts`, `sendReminders.ts`) — `matchAppointmentByText.ts` ahora
+   importa `getCostaRicaHourAndMinute` de ahí en vez de agregar una cuarta copia.
+8. **La regex de `parseTimeFromText` tomaba el primer número suelto del texto como
+   hora, sin exigir am/pm ni `:minutos`** — "la del 15 de agosto" (sin hora
+   mencionada) capturaba el "15" del día del mes como `hour: 15`, y por coincidencia
+   volvía a matchear una cita de las 3pm CR (15h en formato 24h) sin que el paciente
+   hubiera dicho ninguna hora. Encontrado recién al probar el caso "solo fecha,
+   ambiguo" de Categoría 6 — el fix del bug #7 por sí solo no lo cubría. Arreglo:
+   `parseTimeFromText` ahora exige una ancla explícita (am/pm o `:minutos`) para
+   aceptar un número como hora; sin ancla, devuelve `null` (pide aclaración) en vez de
+   adivinar. **Pendiente**: revisar si `matchSlotSelection.ts` tiene el mismo riesgo —
+   usa una regex de hora casi idéntica (ver Pendiente #2).
+
+Los 4 fixes de `matchAppointmentByText.ts` fueron validados con un script aislado
+(`npx tsx --env-file=.env.local`, invoca la función directo con candidatos mock) antes
+de tocar producción — más rápido que iterar por WhatsApp real para bugs de lógica pura,
+sin gastar llamadas a Claude ni depender del webhook. La validación end-to-end con
+WhatsApp real queda como último paso antes de cerrar Categoría 6 (ver Pendiente #1).
+
 **Orden de chequeos en `handleSchedulingTurn.ts`** (importa el orden, no es arbitrario):
 `isMedicalConcern` (máxima prioridad, sin excepción de paso) → `isDecline` (excepto en
 `confirming_cancellation`) → el switch normal por `context.step`, con
@@ -252,32 +290,41 @@ el historial de decisiones si hace falta el detalle exacto de cada una)
 
 ## Estado actual del proyecto
 **En producción real**, circuito completo probado y estresado deliberadamente con casos
-límite antes del piloto — 6 bugs reales encontrados y arreglados, incluyendo dos con
-impacto directo en datos (cita agendada a hora equivocada, cita cancelada sin
-confirmación real).
+límite antes del piloto — 8 bugs reales encontrados y arreglados en total (6 de la
+sesión de stress-testing del 10-11 de agosto, 2 más el 13 de agosto probando
+Categoría 6), incluyendo tres con impacto directo en datos (cita agendada a hora
+equivocada, cita cancelada sin confirmación real, y el par de bugs #7-#8 que podían
+hacer actuar sobre la cita equivocada cuando el paciente tenía más de una activa).
 
 Pendiente (en orden sugerido):
-1. Probar Categoría 6: múltiples citas activas simultáneas, desambiguación correcta
-2. Soporte para selección de horario por posición ("el segundo", "el primero") en
+1. **[EN PROGRESO]** Categoría 6 (múltiples citas activas simultáneas): bugs #7 y #8
+   encontrados y arreglados en `matchAppointmentByText.ts`, validados con script
+   aislado (5/5 casos correctos). Falta el último paso: validación end-to-end con
+   WhatsApp real después del deploy, antes de dar la categoría por cerrada
+2. Revisar si `matchSlotSelection.ts` tiene el mismo riesgo del bug #8 (número suelto
+   sin ancla de am/pm o `:minutos` interpretado como hora) — regex casi idéntica a la
+   que tenía `parseTimeFromText` antes del fix, no confirmado todavía si aplica en ese
+   contexto (ahí el paciente responde sobre una lista cerrada de horarios ofrecidos)
+3. Soporte para selección de horario por posición ("el segundo", "el primero") en
    `matchSlotSelection.ts` — hoy solo entiende horas explícitas
-3. Ajuste de voseo costarricense en el prompt de `generateReply.ts` — Claude generó
+4. Ajuste de voseo costarricense en el prompt de `generateReply.ts` — Claude generó
    "Entendé" (imperativo) donde correspondía "Entiendo" (primera persona) en un mensaje
    de escalación; agregar regla explícita al `SYSTEM_PROMPT`
-4. Decisión de producto: ¿memoria de conversación entre visitas distintas del mismo
+5. Decisión de producto: ¿memoria de conversación entre visitas distintas del mismo
    paciente? Hoy `context` es solo memoria de corto plazo del flujo en curso, se
    resetea a `{}` al terminar cada flujo; ninguna llamada a Claude lee el historial de
    `messages`. Pros/contras y costo en tokens a evaluar antes de construir nada
-5. Investigar publicar la OAuth consent screen de Google (ver Notas técnicas)
-6. Verificar dominio propio en Resend
-7. Considerar dominio propio para la app en vez del subdominio de Vercel
-8. Fusionar `classify.ts` + `interpretSchedulingIntent.ts` en una sola llamada (cambio
+6. Investigar publicar la OAuth consent screen de Google (ver Notas técnicas)
+7. Verificar dominio propio en Resend
+8. Considerar dominio propio para la app en vez del subdominio de Vercel
+9. Fusionar `classify.ts` + `interpretSchedulingIntent.ts` en una sola llamada (cambio
    de riesgo real sobre el flujo de agenda ya probado — hacer con sesión fresca)
-9. Preparar presentación final para clientes piloto: demo curada de camino feliz,
-   features Post-MVP como visión de producto (memoria de paciente, insights, B24-B26
-   del Excel), reporte semanal ya construido como diferenciador, estructura de
-   suscripciones/precios (pendiente de definir con datos reales del piloto)
-10. Actualizar el Excel con todo el trabajo de ambas sesiones — sigue desactualizado
-11. Evaluar eliminar `DEV_CLINIC_ID`/`config.ts` si no queda ningún uso real
+10. Preparar presentación final para clientes piloto: demo curada de camino feliz,
+    features Post-MVP como visión de producto (memoria de paciente, insights, B24-B26
+    del Excel), reporte semanal ya construido como diferenciador, estructura de
+    suscripciones/precios (pendiente de definir con datos reales del piloto)
+11. Actualizar el Excel con todo el trabajo de ambas sesiones — sigue desactualizado
+12. Evaluar eliminar `DEV_CLINIC_ID`/`config.ts` si no queda ningún uso real
 
 ## Fuente de verdad
 El roadmap completo, backlog y decisiones viven en `DentIA_-_Action_Plan___Roadmap.xlsx`
