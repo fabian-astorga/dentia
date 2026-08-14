@@ -50,19 +50,24 @@ proxy.ts                        → protege /panel/*, redirige a /panel/login si
                   availability.ts (recibe businessHours como parámetro — YA NO es un
                   valor global, ver "Configuración por clínica"), constants.ts
   /scheduling   → handleSchedulingTurn.ts (máquina de estados — ver orden de chequeos
-                  en Notas técnicas), timezone.ts (ÚNICA fuente de verdad para el
-                  offset de Costa Rica y la conversión UTC↔hora-de-pared — ver Notas
-                  técnicas, bugs #2 y #7; todo lo demás en esta carpeta importa de
-                  acá, no duplicar el offset en un archivo nuevo),
-                  matchSlotSelection.ts (timezone-safe vía timezone.ts, ver Notas
-                  técnicas), matchAppointmentByText.ts (timezone-safe vía
-                  timezone.ts, y con ancla explícita de hora en `parseTimeFromText`
-                  — ver Notas técnicas, bugs #7 y #8), isAffirmative.ts (match por
-                  frase completa, no substring — ver Notas técnicas), isDecline.ts
-                  (salida determinística del flujo), isMedicalConcern.ts (escalación
-                  médica en cualquier paso, máxima prioridad), looksLikeQuestion.ts
-                  (detecta cambio de tema en medio del flujo),
-                  isWithinBusinessHours.ts (compara hora actual CR contra
+                  en Notas técnicas; calcula `todayISO` con getCostaRicaTodayISO(),
+                  NUNCA con new Date().toISOString() directo — ver Notas técnicas,
+                  bug #9), timezone.ts (ÚNICA fuente de verdad para el offset de
+                  Costa Rica, la conversión UTC↔hora-de-pared, y la fecha de hoy en
+                  CR — ver Notas técnicas, bugs #2, #7 y #9; todo lo demás en esta
+                  carpeta importa de acá, no duplicar el offset en un archivo nuevo),
+                  resolveRelativeDate.ts (cálculo determinístico de fechas relativas
+                  — día de semana, "mañana" — SIN IA; Claude solo identifica qué dijo
+                  el paciente, este módulo calcula la fecha real — ver Notas
+                  técnicas, bug #10), matchSlotSelection.ts (timezone-safe vía
+                  timezone.ts, ver Notas técnicas), matchAppointmentByText.ts
+                  (timezone-safe vía timezone.ts, y con ancla explícita de hora en
+                  `parseTimeFromText` — ver Notas técnicas, bugs #7 y #8),
+                  isAffirmative.ts (match por frase completa, no substring — ver
+                  Notas técnicas), isDecline.ts (salida determinística del flujo),
+                  isMedicalConcern.ts (escalación médica en cualquier paso, máxima
+                  prioridad), looksLikeQuestion.ts (detecta cambio de tema en medio
+                  del flujo), isWithinBusinessHours.ts (compara hora actual CR contra
                   businessHours de la clínica, vía timezone.ts), format.ts,
                   sendReminders.ts (ventana de día completo, cron 1x/día, vía
                   timezone.ts), constants.ts (ahora son DEFAULTS, ver
@@ -253,6 +258,36 @@ de tocar producción — más rápido que iterar por WhatsApp real para bugs de 
 sin gastar llamadas a Claude ni depender del webhook. La validación end-to-end con
 WhatsApp real queda como último paso antes de cerrar Categoría 6 (ver Pendiente #1).
 
+9. **`handleSchedulingTurn.ts` calculaba `todayISO` con
+   `new Date().toISOString().slice(0, 10)` — fecha en UTC del servidor, no en hora de
+   Costa Rica.** Como CR está 6 horas atrás de UTC, cualquier momento después de ~6pm
+   hora CR ya cruzó a "mañana" en UTC. Ese `todayISO` mal calculado se propagaba a
+   `extractDateAndReason`, `interpretSchedulingIntent` y `matchAppointmentByText` (los
+   tres lo reciben como parámetro, ninguno lo recalcula). Encontrado probando
+   Categoría 6 a las 7:41pm CR: "el viernes" volvió a resolver una semana después en
+   vez de mañana — el fix del bug de fechas relativas (más abajo) estaba funcionando
+   perfecto, pero el insumo que recibía ("hoy") ya estaba mal. Arreglo: nuevo
+   `getCostaRicaTodayISO()` en `timezone.ts`, usado en el único punto de origen
+   (`handleSchedulingTurn.ts`) — se corrige para los tres callers downstream sin
+   tocarlos. Validado con Date simulado a las 7:41pm CR antes de deployar.
+
+**Bug de fechas relativas, mismo día (13 de agosto 2026), encontrado en el camino de
+probar Categoría 6 — no es de la familia de la Regla #5, pero es el mismo patrón de
+"parece razonable, falla en un caso real":**
+
+10. **`extractDate.ts` e `interpretSchedulingIntent.ts` le pedían a Claude que calculara
+    la fecha de "el próximo día de la semana" dentro del prompt** — instrucción
+    ambigua incluso para humanos ("el próximo viernes" dicho un jueves puede
+    entenderse como mañana, o como saltarse ese y ser el de la semana siguiente).
+    Encontrado con un caso real: "viernes" dicho un jueves resolvió al viernes de la
+    semana siguiente, no al día siguiente. Arreglo: se le sacó el cálculo a Claude
+    por completo — ahora solo identifica QUÉ dijo el paciente (día de semana
+    suelto, "mañana", fecha explícita) vía un `dateSignal` estructurado, y un nuevo
+    módulo determinístico (`lib/scheduling/resolveRelativeDate.ts`, sin IA) calcula
+    la fecha real. Mismo principio que `matchSlotSelection.ts`: entender texto es
+    trabajo de Claude, calcular es trabajo de código. El prompt estaba duplicado en
+    los dos archivos — el fix se escribió una sola vez en el módulo compartido.
+
 **Orden de chequeos en `handleSchedulingTurn.ts`** (importa el orden, no es arbitrario):
 `isMedicalConcern` (máxima prioridad, sin excepción de paso) → `isDecline` (excepto en
 `confirming_cancellation`) → el switch normal por `context.step`, con
@@ -290,21 +325,25 @@ el historial de decisiones si hace falta el detalle exacto de cada una)
 
 ## Estado actual del proyecto
 **En producción real**, circuito completo probado y estresado deliberadamente con casos
-límite antes del piloto — 8 bugs reales encontrados y arreglados en total (6 de la
-sesión de stress-testing del 10-11 de agosto, 2 más el 13 de agosto probando
-Categoría 6), incluyendo tres con impacto directo en datos (cita agendada a hora
-equivocada, cita cancelada sin confirmación real, y el par de bugs #7-#8 que podían
-hacer actuar sobre la cita equivocada cuando el paciente tenía más de una activa).
+límite antes del piloto — **10 bugs reales** encontrados y arreglados en total (6 de la
+sesión de stress-testing del 10-11 de agosto, 4 más el 13 de agosto probando
+Categoría 6), incluyendo cuatro con impacto directo en datos (cita agendada a hora
+equivocada, cita cancelada sin confirmación real, y el trío de bugs #7/#8/#9 que podían
+hacer actuar sobre la cita equivocada o calcular fechas mal cuando el paciente tenía más
+de una cita activa). **Categoría 6 (múltiples citas activas simultáneas) cerrada de
+punta a punta**: los 5 casos de desambiguación (hora exacta, fecha ambigua, hora
+inexistente, mensaje vago, resolución tras pedir precisión) validados con WhatsApp real
+contra el bot en producción, no solo con script.
 
 Pendiente (en orden sugerido):
-1. **[EN PROGRESO]** Categoría 6 (múltiples citas activas simultáneas): bugs #7 y #8
-   encontrados y arreglados en `matchAppointmentByText.ts`, validados con script
-   aislado (5/5 casos correctos). Falta el último paso: validación end-to-end con
-   WhatsApp real después del deploy, antes de dar la categoría por cerrada
-2. Revisar si `matchSlotSelection.ts` tiene el mismo riesgo del bug #8 (número suelto
+1. Revisar si `matchSlotSelection.ts` tiene el mismo riesgo del bug #8 (número suelto
    sin ancla de am/pm o `:minutos` interpretado como hora) — regex casi idéntica a la
    que tenía `parseTimeFromText` antes del fix, no confirmado todavía si aplica en ese
    contexto (ahí el paciente responde sobre una lista cerrada de horarios ofrecidos)
+2. Mejorar la redacción del mensaje de desambiguación cuando el paciente ya dio la
+   fecha pero falta la hora — hoy dice "escribime la fecha exacta" aunque el paciente
+   ya la dio (solo falta la hora), puede confundir en un caso real; detectado
+   probando Categoría 6 (ver captura de WhatsApp, 13 de agosto)
 3. Soporte para selección de horario por posición ("el segundo", "el primero") en
    `matchSlotSelection.ts` — hoy solo entiende horas explícitas
 4. Ajuste de voseo costarricense en el prompt de `generateReply.ts` — Claude generó
