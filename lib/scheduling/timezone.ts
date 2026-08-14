@@ -35,6 +35,18 @@ export function getCostaRicaHourAndMinute(input: Date | string): { hour: number;
   return { hour: crDate.getUTCHours(), minute: crDate.getUTCMinutes() };
 }
 
+// Fecha calendario ACTUAL en Costa Rica (YYYY-MM-DD), no en UTC del
+// servidor. IMPORTANTE: `new Date().toISOString().slice(0, 10)` da la
+// fecha en UTC — como CR está 6 horas atrás, cualquier momento después
+// de las ~6pm hora CR ya cruzó a "mañana" en UTC. Eso hacía que
+// handleSchedulingTurn.ts calculara `todayISO` un día adelantado
+// durante la tarde/noche en CR, y con eso `resolveWeekdayDate` recibía
+// un "hoy" equivocado — encontrado probando a las 7:41pm CR, donde
+// "viernes" volvió a resolver a una semana después en vez de mañana.
+export function getCostaRicaTodayISO(referenceDate: Date = new Date()): string {
+  return toCostaRicaWallClock(referenceDate).toISOString().slice(0, 10);
+}
+
 // Solo la hora actual en Costa Rica — usado para comparar contra
 // businessHours (isWithinBusinessHours.ts).
 export function getCurrentCostaRicaHour(referenceDate: Date = new Date()): number {

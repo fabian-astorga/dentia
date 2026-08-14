@@ -10,6 +10,7 @@ import { isAffirmative } from "./isAffirmative";
 import { isDecline } from "./isDecline";
 import { isMedicalConcern } from "./isMedicalConcern";
 import { formatTimeForHuman, formatDateTimeForHuman, formatDateLabel } from "./format";
+import { getCostaRicaTodayISO } from "./timezone";
 import {
   insertAppointment,
   getAppointmentById,
@@ -129,7 +130,15 @@ export async function handleSchedulingTurn(
   context: SchedulingContext,
   conversationId: string
 ): Promise<SchedulingResult> {
-  const todayISO = new Date().toISOString().slice(0, 10);
+  // IMPORTANTE: NUNCA usar new Date().toISOString().slice(0, 10) acá —
+  // eso da la fecha en UTC del servidor (Vercel), no en Costa Rica.
+  // Como CR está 6 horas atrás, cualquier momento después de ~6pm hora
+  // CR ya cruzó a "mañana" en UTC, y todo lo que depende de este
+  // todayISO (extractDateAndReason, interpretSchedulingIntent,
+  // matchAppointmentByText) heredaba un "hoy" equivocado. Encontrado
+  // probando a las 7:41pm CR: "el viernes" volvió a resolver una
+  // semana después en vez de mañana. Ver Notas técnicas en CLAUDE.md.
+  const todayISO = getCostaRicaTodayISO();
 
   if (isMedicalConcern(messageText)) {
     await notifyStaffOfEscalation({ clinicId, patientPhone: phone, messageText });
