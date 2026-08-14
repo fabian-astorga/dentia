@@ -5,6 +5,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export type ReplySituation =
   | "greeting"
+  | "cordial_closing"
   | "flow_exited"
   | "off_topic_during_flow"
   | "ask_date"
@@ -25,6 +26,8 @@ interface GenerateReplyInput {
 const SITUATION_GUIDANCE: Record<ReplySituation, string> = {
   greeting:
     "El paciente solo saludó, sin pedir nada específico todavía. Saludalo con calidez y contale brevemente que podés ayudarlo a agendar, reprogramar o cancelar una cita.",
+  cordial_closing:
+    "El paciente cerró la conversación con algo cordial (agradecimiento, 'listo', 'dale', etc.), sin pedir nada más. Respondé con una despedida breve y cálida — no repitas lo que ya se resolvió, no le ofrezcas ayuda adicional a menos que quede natural.",
   flow_exited:
     "El paciente decidió no seguir con lo que estaba haciendo (agendar, reprogramar o cancelar una cita). Respondé con calidez, sin insistir ni preguntar por qué, dejando claro que podés ayudarlo cuando quiera retomarlo.",
   off_topic_during_flow:

@@ -2,6 +2,7 @@ import { classifyIntent, type DetectedIntent } from "@/lib/ai/classify";
 import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
 import { BOT_REPLIES } from "@/lib/whatsapp/replies";
 import { isGreeting } from "@/lib/whatsapp/isGreeting";
+import { isCourtesyClosing } from "@/lib/whatsapp/isCourtesyClosing";
 import {
   findOrCreateConversation,
   touchConversation,
@@ -48,6 +49,14 @@ export async function handleIncomingMessage(
   } else if (isGreeting(messageText)) {
     replyText = await generateReply({ situation: "greeting", facts: {} });
     detectedIntent = "saludo";
+  } else if (isCourtesyClosing(messageText)) {
+    // Filtro determinístico, mismo criterio que isGreeting justo arriba
+    // — evita mandarle un "gracias"/"listo"/"dale" al clasificador de
+    // IA, donde antes caía en el fallback "ambiguo → caso_especial" y
+    // disparaba una falsa alarma de escalación. Ver Notas técnicas en
+    // CLAUDE.md.
+    replyText = await generateReply({ situation: "cordial_closing", facts: {} });
+    detectedIntent = "cortesia";
   } else {
     const classification = await classifyIntent(messageText);
     detectedIntent = classification.intent;
