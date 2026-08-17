@@ -5,19 +5,23 @@ export const STATUS_LABEL: Record<string, string> = {
 };
 
 export const STATUS_STYLE: Record<string, string> = {
-  active: "bg-[#E1F5EE] text-[#085041]",
-  escalated: "bg-[#FAECE7] text-[#712B13]",
-  closed: "bg-[#F1EFE8] text-[#5F5E5A]",
+  active: "bg-status-positive-bg text-status-positive-text",
+  escalated: "bg-status-alert-bg text-status-alert-text",
+  closed: "bg-status-neutral-bg text-status-neutral-text",
 };
 
 export const INTENT_LABEL: Record<string, string> = {
   faq: "Pregunta general",
   agendar_cita: "Agendar cita",
   caso_especial: "Caso especial",
+  saludo: "Saludo",
+  cortesia: "Cortesía",
 };
 
 export const INTENT_STYLE: Record<string, string> = {
-  faq: "bg-[#E1F5EE] text-[#085041]",
-  agendar_cita: "bg-[#EEEDFE] text-[#26215C]",
-  caso_especial: "bg-[#FAECE7] text-[#712B13]",
+  faq: "bg-status-info-bg text-status-info-text",
+  agendar_cita: "bg-status-positive-bg text-status-positive-text",
+  caso_especial: "bg-status-alert-bg text-status-alert-text",
+  saludo: "bg-status-warm-bg text-status-warm-text",
+  cortesia: "bg-status-neutral-bg text-status-neutral-text",
 };

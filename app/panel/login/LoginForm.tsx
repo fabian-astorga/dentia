@@ -25,7 +25,7 @@ export function LoginForm() {
 
   if (status === "sent") {
     return (
-      <p className="text-sm text-[#1B2430]">
+      <p className="text-sm text-brand-text">
         Listo — revisá tu correo (<strong>{email}</strong>) y hacé click en el
         enlace para entrar. Podés cerrar esta pestaña.
       </p>
@@ -40,12 +40,12 @@ export function LoginForm() {
         placeholder="tu@clinica.com"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        className="border border-[#E4E1D8] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0E7C7B]"
+        className="border border-brand-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary"
       />
       <button
         type="submit"
         disabled={status === "sending"}
-        className="bg-[#0E7C7B] text-white rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-50"
+        className="bg-brand-primary hover:bg-brand-primary-hover transition-colors text-white rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-50"
       >
         {status === "sending" ? "Enviando..." : "Enviar enlace"}
       </button>

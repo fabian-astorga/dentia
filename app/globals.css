@@ -1,26 +1,48 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  /* Superficies */
+  --color-brand-bg: #F7F5F1;
+  --color-brand-surface: #FFFFFF;
+  --color-brand-border: #E4E1D8;
+  --color-brand-divider: #EDEAE1;
+  --color-brand-hover: #F1EFE8;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Verde — familia principal. Reemplaza el navy + teal + dorado que
+     competían entre sí en la versión anterior por una sola familia de
+     color con más peso visual, más un único acento cálido (ver abajo). */
+  --color-brand-primary: #5B8266;
+  --color-brand-primary-hover: #4C6F58;
+  --color-brand-primary-soft: #EAF0EC;
+  --color-brand-heading: #2F4438;
+
+  /* Dorado — único acento cálido. Uso mínimo a propósito: detalles
+     (una línea, un ícono), nunca fondos grandes ni texto de cuerpo. */
+  --color-brand-accent: #C99A3B;
+
+  /* Texto */
+  --color-brand-text: #1B2430;
+  --color-brand-muted: #8A8778;
+  --color-brand-faint: #B0AD9F;
+
+  /* Estados — cada par bg/text es una intención semántica (positivo,
+     alerta, neutro, informativo, cálido), no una secuencia de colores
+     sin significado. Reutilizado tanto para status de conversación
+     como para intención detectada, así una alerta siempre se ve igual
+     sin importar de qué lista viene. */
+  --color-status-positive-bg: #EAF0EC;
+  --color-status-positive-text: #2F4438;
+  --color-status-alert-bg: #FAECE7;
+  --color-status-alert-text: #712B13;
+  --color-status-neutral-bg: #F1EFE8;
+  --color-status-neutral-text: #5F5E5A;
+  --color-status-info-bg: #E6F1FB;
+  --color-status-info-text: #0C447C;
+  --color-status-warm-bg: #FBF3E2;
+  --color-status-warm-text: #7A5A16;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-brand-bg);
+  color: var(--color-brand-text);
 }
