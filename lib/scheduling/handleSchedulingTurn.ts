@@ -296,9 +296,27 @@ export async function handleSchedulingTurn(
     }
 
     if (active.length > 1) {
+      // Antes de pedirle al paciente que repita la fecha/hora, intentamos
+      // resolver con lo que YA escribió en este mismo mensaje — si dijo
+      // "la de las 2:30pm" en su primer mensaje, no tiene sentido
+      // ignorarlo y preguntarle de nuevo. Encontrado en vivo probando
+      // Categoría 6: el bot pedía "escribime la fecha exacta" incluso
+      // cuando el paciente ya la había dado. Ver Notas técnicas en
+      // CLAUDE.md.
+      const candidates = active.map((a) => ({ id: a.id, scheduledAt: new Date(a.scheduledAt) }));
+      const match = await matchAppointmentByText(messageText, todayISO, candidates);
+
+      if (match) {
+        return beginActionForAppointment(clinicId, match, intent.action as "cancel" | "reschedule");
+      }
+
       const list = active.map((a) => formatDateTimeForHuman(new Date(a.scheduledAt))).join("; ");
+      // Si ya identificamos una fecha en el mensaje (aunque no haya
+      // alcanzado para desambiguar sola), lo que realmente falta es la
+      // hora — no repetir "la fecha" cuando el paciente ya la dio.
+      const faltante = intent.date ? "la hora exacta" : "la fecha y hora exacta";
       return {
-        replyText: `Tenés más de una cita activa (${list}). Por ahora escribime la fecha exacta de la que querés ${
+        replyText: `Tenés más de una cita activa (${list}). Decime ${faltante} de la que querés ${
           intent.action === "cancel" ? "cancelar" : "reprogramar"
         }.`,
         newContext: { step: "selecting_appointment", action: intent.action },
