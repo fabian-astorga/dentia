@@ -364,6 +364,52 @@ Pendiente (en orden sugerido):
     suscripciones/precios (pendiente de definir con datos reales del piloto)
 11. Actualizar el Excel con todo el trabajo de ambas sesiones — sigue desactualizado
 12. Evaluar eliminar `DEV_CLINIC_ID`/`config.ts` si no queda ningún uso real
+13. **"Dentipedia"** — sección educativa de higiene dental (cepillado, hilo dental,
+    enjuague, elección de cepillo) con información comprobada. Dos fases: (1) respuestas
+    curadas dentro del bot de WhatsApp, reutilizando el intent `"faq"` ya existente en
+    `classify.ts`/`handleIncomingMessage.ts` (hoy solo tiene un placeholder); (2)
+    microsite público sin login, pensado para SEO y captación de leads, ejecutable
+    cuando el volumen de pacientes lo justifique. En ambas fases, el contenido debe
+    estar pre-escrito y aprobado por un dentista real — la IA nunca genera el consejo
+    en el momento, solo clasifica y recupera contenido ya validado (mismo principio que
+    el resto de guardrails de este documento). Idea de Fabián (16 de agosto 2026),
+    documentada también en el Excel (Backlog MVP, B31) y en el Business Case (sección
+    17, Parking Lot).
+14. **Brief automático pre-cita** — el panel muestra un resumen breve (2-3 líneas,
+    generado por IA) de lo que el paciente ya contó por WhatsApp al agendar, para que
+    el dentista no tenga que abrir el hilo completo antes de cada cita. Límite
+    importante: la IA relata lo que el paciente dijo textualmente, nunca interpreta ni
+    genera hipótesis clínicas — mismo guardrail que el resto del producto. Inspirado en
+    investigación de competencia (Dentalink/Huli, ver Excel B32).
+15. **Lista de espera con relleno automático** — al procesar una cancelación
+    (`handleSchedulingTurn.ts`), ofrecer automáticamente el horario liberado a
+    pacientes en espera o que habían pedido algo más cercano, en vez de solo liberarlo
+    sin más. Patrón estándar en herramientas de automatización dental (ver Excel B33)
+    — métrica de valor muy demostrable para clientes piloto (ingreso recuperado, no
+    solo espacio liberado).
+16. **Recordatorio de control periódico (recall)** — panel muestra pacientes que ya
+    pasaron su intervalo normal de control (ej. limpieza cada 6 meses) sin volver.
+    Distinto de B21 (seguimiento postconsulta): esto es sobre visitas de rutina
+    vencidas, no atención post-tratamiento. El dentista aprueba el envío del
+    recordatorio — no se dispara solo, dado el consentimiento requerido bajo la Ley
+    8968 (ver Excel B34).
+14. **Brief automático antes de cada cita** — resumen breve (Claude) de lo que el
+    paciente ya contó por WhatsApp, visible en el panel antes de atenderlo. Relata
+    textualmente, nunca interpreta ni diagnostica — mismo guardrail que el resto del
+    producto. Inspirado en investigación de mercado (Dentalink, Huli). Excel: B32.
+15. **Lista de espera con relleno automático** — al cancelar una cita, el bot ofrece
+    automáticamente ese horario a otro paciente en espera en vez de dejarlo vacío.
+    Patrón estándar en herramientas de automatización dental (DoctorConnect,
+    RevenueWell), con evidencia de recuperación de ingresos real. Excel: B33.
+16. **Recordatorio de control periódico (recall)** — panel muestra pacientes atrasados
+    para su próxima visita de rutina; el dentista aprueba el envío del recordatorio vía
+    el bot (nunca se dispara solo, por la Ley 8968). Distinto de B21 (seguimiento
+    post-tratamiento). Excel: B34.
+
+Las tres ideas #14-16 surgieron de una investigación de mercado (Dentalink, Huli,
+DoctorConnect/RevenueWell) hecha el 16 de agosto 2026, a pedido de Fabián para
+identificar funciones de valor que otros productos ya validan. Documentadas también en
+el Excel (Backlog MVP) y el Business Case (Parking Lot).
 
 ## Fuente de verdad
 El roadmap completo, backlog y decisiones viven en `DentIA_-_Action_Plan___Roadmap.xlsx`
