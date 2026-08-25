@@ -3,6 +3,7 @@ import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
 import { BOT_REPLIES } from "@/lib/whatsapp/replies";
 import { isGreeting } from "@/lib/whatsapp/isGreeting";
 import { isCourtesyClosing } from "@/lib/whatsapp/isCourtesyClosing";
+import { getClinicById } from "@/lib/db/queries/clinics";
 import {
   findOrCreateConversation,
   touchConversation,
@@ -47,7 +48,15 @@ export async function handleIncomingMessage(
     await updateConversationContext(conversation.id, result.newContext);
     detectedIntent = result.escalated ? "caso_especial" : "agendar_cita";
   } else if (isGreeting(messageText)) {
-    replyText = await generateReply({ situation: "greeting", facts: {} });
+    // Traemos el nombre real de la clínica para que el paciente sienta
+    // que le habla a SU clínica, no a un producto genérico llamado
+    // "DentIA" — el nombre solo se necesita acá, en la presentación
+    // inicial; repetirlo en cada respuesta sonaría robótico.
+    const clinic = await getClinicById(clinicId);
+    replyText = await generateReply({
+      situation: "greeting",
+      facts: clinic?.name ? { nombre_clinica: clinic.name } : {},
+    });
     detectedIntent = "saludo";
   } else if (isCourtesyClosing(messageText)) {
     // Filtro determinístico, mismo criterio que isGreeting justo arriba
