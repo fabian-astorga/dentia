@@ -38,7 +38,7 @@ export async function listConversationsForCurrentUser(): Promise<PanelConversati
       message: error.message,
       code: error.code,
       details: error.details,
-      hint: error.hint,
+      hint: error.hint,  
     });
     return [];
   }
