@@ -296,8 +296,27 @@ probar Categoría 6 — no es de la familia de la Regla #5, pero es el mismo pat
 
 - **Google OAuth: refresh token expira a los 7 días mientras la app esté en modo
   "Testing" (no verificada).** Arreglo temporal: reconectar vía `/api/auth/google/start`.
-  **Pendiente**: investigar si el scope de Calendar usado permite publicar la consent
-  screen sin el proceso completo de verificación de Google.
+  Confirmado en la práctica el 24-25 de agosto: el token venció durante una sesión de
+  trabajo larga, causando errores `invalid_grant` (500) en cualquier acción que tocara
+  el calendario. Scope achicado a `calendar.events` (antes `calendar` completo, ver
+  `lib/google/constants.ts`) — verificado en la pantalla de consentimiento de Google
+  que el texto mostrado ya corresponde al scope reducido ("Ver y editar eventos de
+  todos tus calendarios", no "todos tus calendarios" a secas). **Pendiente**:
+  investigar si el scope reducido permite publicar la consent screen sin el proceso
+  completo de verificación de Google.
+
+11. **Sin deduplicación de mensajes de WhatsApp por `wamid` — reintentos de Meta pueden
+    procesar el mismo mensaje más de una vez.** Encontrado el 24-25 de agosto: mientras
+    el webhook devolvía 500 (por el `invalid_grant` de arriba), Meta encoló reintentos
+    de esos mensajes (documentado: backoff exponencial, hasta 7 días antes de
+    descartar el evento). Al arreglarse el token, esos reintentos se entregaron todos
+    juntos, y el código los procesó como mensajes nuevos — generando respuestas del
+    bot sin un mensaje de paciente correspondiente visible en esa sesión (parecía que
+    el bot "alucinaba"). No hay ningún bug de lógica acá: es la ausencia de un chequeo
+    de idempotencia. `WhatsAppInboundMessage.id` (el `wamid`) ya se captura en
+    `types.ts`, pero nunca se usa para deduplicar. Fix pendiente (ver Pendiente #1):
+    columna `whatsappMessageId` (UNIQUE) en `messages` + corte temprano en
+    `handleIncomingMessage.ts` si el `wamid` ya existe.
 - **RLS activo ≠ política RLS escrita** — activar RLS es un paso separado del `CREATE
   POLICY`. Verificar siempre el badge "UNRESTRICTED" en Supabase.
 - **`GRANT` y RLS son capas distintas** — `GRANT SELECT` es el permiso de entrada, RLS
@@ -325,46 +344,77 @@ el historial de decisiones si hace falta el detalle exacto de cada una)
 
 ## Estado actual del proyecto
 **En producción real**, circuito completo probado y estresado deliberadamente con casos
-límite antes del piloto — **10 bugs reales** encontrados y arreglados en total (6 de la
-sesión de stress-testing del 10-11 de agosto, 4 más el 13 de agosto probando
-Categoría 6), incluyendo cuatro con impacto directo en datos (cita agendada a hora
-equivocada, cita cancelada sin confirmación real, y el trío de bugs #7/#8/#9 que podían
-hacer actuar sobre la cita equivocada o calcular fechas mal cuando el paciente tenía más
-de una cita activa). **Categoría 6 (múltiples citas activas simultáneas) cerrada de
-punta a punta**: los 5 casos de desambiguación (hora exacta, fecha ambigua, hora
-inexistente, mensaje vago, resolución tras pedir precisión) validados con WhatsApp real
-contra el bot en producción, no solo con script.
+límite antes del piloto — **11 bugs reales** encontrados y arreglados en total. Categoría 6
+(múltiples citas activas simultáneas) cerrada de punta a punta. Identidad visual base
+aplicada (logo, paleta verde cálida, tokens de diseño) y bloque "Próximamente" en el panel
+para mostrar profundidad de roadmap en demos.
+
+**Guión de pruebas pre-demo (8 pasos) — 4 de 8 confirmados con WhatsApp real + Google
+Calendar + panel**: saludo, agendar, reprogramar y la primera impresión del panel.
+Quedan: escalación médica, múltiples citas (resolución directa), cierre cordial, revisión
+final del panel.
+
+**Sesión del 24-25 de agosto — reconexión de Google Calendar y hallazgo de reintentos de
+Meta**: el refresh token de Google (modo Testing, vence cada 7 días) efectivamente venció
+en medio de esta sesión, confirmando en la práctica el riesgo que ya se había anticipado.
+Reconectado con el scope achicado (`calendar.events`, ver bug técnico más abajo). Durante
+el tiempo que el webhook devolvía 500 (por el token vencido), **Meta encoló reintentos de
+esos mismos mensajes** — al arreglarse el token, esos reintentos se entregaron todos
+juntos, generando respuestas del bot que parecían "aparecer solas" sin mensaje nuevo del
+paciente. No es un bug de lógica; es la ausencia de deduplicación por `wamid` (ver
+Pendiente #1, ahora la prioridad más alta).
+
+También en esta sesión: se sobreescribió por accidente `lib/db/queries/conversations.ts`
+(Drizzle, usado por el bot) con el contenido de `lib/supabase/queries/conversations.ts`
+(usado por el panel) — dos archivos con el mismo nombre en carpetas distintas, fácil de
+confundir al pegar contenido a mano. Restaurado desde `git show <commit>:<path>` contra el
+último commit bueno. Lección: **extremar cuidado al copiar contenido entre archivos que
+comparten nombre pero viven en carpetas distintas** — confirmar la ruta completa antes de
+pegar, no solo el nombre del archivo.
 
 Pendiente (en orden sugerido):
-1. Revisar si `matchSlotSelection.ts` tiene el mismo riesgo del bug #8 (número suelto
-   sin ancla de am/pm o `:minutos` interpretado como hora) — regex casi idéntica a la
-   que tenía `parseTimeFromText` antes del fix, no confirmado todavía si aplica en ese
-   contexto (ahí el paciente responde sobre una lista cerrada de horarios ofrecidos)
-2. Mejorar la redacción del mensaje de desambiguación cuando el paciente ya dio la
-   fecha pero falta la hora — hoy dice "escribime la fecha exacta" aunque el paciente
-   ya la dio (solo falta la hora), puede confundir en un caso real; detectado
-   probando Categoría 6 (ver captura de WhatsApp, 13 de agosto)
-3. Soporte para selección de horario por posición ("el segundo", "el primero") en
+1. **[NUEVO, prioridad alta]** Deduplicación de mensajes de WhatsApp por `wamid`
+   (`WhatsAppInboundMessage.id`, ya capturado en `types.ts`) — agregar columna
+   `whatsappMessageId` (UNIQUE) a la tabla `messages` en `lib/db/schema.ts` + migración,
+   y cortar el procesamiento temprano en `handleIncomingMessage.ts` si el `wamid` ya
+   existe. Sin esto, cualquier reintento de Meta (no solo los de hoy) puede generar una
+   respuesta duplicada o una acción repetida sobre una cita real. No bloquea la demo,
+   pero es necesario antes de un piloto real con tráfico continuo.
+2. Terminar el guión de pruebas pre-demo: pasos 5 (escalación médica), 6 (múltiples
+   citas, resolución directa), 7 (cierre cordial sin falsa alarma), 8 (revisión final
+   del panel)
+3. Confirmar en vivo el fix del saludo con nombre real de clínica ("Soy el asistente de
+   [Clínica]" en vez de "Sos DentIA" genérico) — deployado, sin confirmar todavía con
+   WhatsApp real. Verificar antes que `clinics.name` tenga un valor real cargado, si no
+   el fallback genérico va a hacer parecer que el fix no funcionó
+4. Reestructurar el sidebar del panel de una lista plana a **navegación con secciones
+   reales** (Conversaciones + Pacientes/Contenido/Reportes/Configuración bloqueadas con
+   "Próximamente") — idea aprobada, todavía no implementada. El bloque "Próximamente"
+   actual (pie del sidebar) queda como base para esto
+5. Housekeeping antes de la demo real: limpiar conversaciones/citas de prueba
+   acumuladas, decidir qué hacer con los eventos de Google Calendar de pruebas viejas
+6. Soporte para selección de horario por posición ("el segundo", "el primero") en
    `matchSlotSelection.ts` — hoy solo entiende horas explícitas
-4. Ajuste de voseo costarricense en el prompt de `generateReply.ts` — Claude generó
-   "Entendé" (imperativo) donde correspondía "Entiendo" (primera persona) en un mensaje
-   de escalación; agregar regla explícita al `SYSTEM_PROMPT`
-5. Decisión de producto: ¿memoria de conversación entre visitas distintas del mismo
+7. Decisión de producto: ¿memoria de conversación entre visitas distintas del mismo
    paciente? Hoy `context` es solo memoria de corto plazo del flujo en curso, se
    resetea a `{}` al terminar cada flujo; ninguna llamada a Claude lee el historial de
    `messages`. Pros/contras y costo en tokens a evaluar antes de construir nada
-6. Investigar publicar la OAuth consent screen de Google (ver Notas técnicas)
-7. Verificar dominio propio en Resend
-8. Considerar dominio propio para la app en vez del subdominio de Vercel
-9. Fusionar `classify.ts` + `interpretSchedulingIntent.ts` en una sola llamada (cambio
-   de riesgo real sobre el flujo de agenda ya probado — hacer con sesión fresca)
-10. Preparar presentación final para clientes piloto: demo curada de camino feliz,
+8. Camino en paralelo, no bloquea la demo — dominio propio + política de privacidad +
+   verificación de Google ante Google (solo importa para sostener un piloto real de
+   semanas sin reconectar el calendario cada 7 días)
+9. Token de Meta: pasar de temporal a System User permanente, para no depender de
+   regenerarlo
+10. Verificar dominio propio en Resend
+11. Fusionar `classify.ts` + `interpretSchedulingIntent.ts` en una sola llamada (cambio
+    de riesgo real sobre el flujo de agenda ya probado — hacer con sesión fresca)
+12. Preparar presentación final para clientes piloto: demo curada de camino feliz,
     features Post-MVP como visión de producto (memoria de paciente, insights, B24-B26
-    del Excel), reporte semanal ya construido como diferenciador, estructura de
-    suscripciones/precios (pendiente de definir con datos reales del piloto)
-11. Actualizar el Excel con todo el trabajo de ambas sesiones — sigue desactualizado
-12. Evaluar eliminar `DEV_CLINIC_ID`/`config.ts` si no queda ningún uso real
-13. **"Dentipedia"** — sección educativa de higiene dental (cepillado, hilo dental,
+    del Excel, y las ideas #14-17 de abajo), reporte semanal ya construido como
+    diferenciador, estructura de suscripciones/precios (pendiente de definir con datos
+    reales del piloto)
+13. Actualizar el Excel con todo el trabajo de esta sesión — sigue desactualizado
+14. Evaluar eliminar `DEV_CLINIC_ID`/`config.ts` si no queda ningún uso real
+15. **"Dentipedia"** — sección educativa de higiene dental (cepillado, hilo dental,
     enjuague, elección de cepillo) con información comprobada. Dos fases: (1) respuestas
     curadas dentro del bot de WhatsApp, reutilizando el intent `"faq"` ya existente en
     `classify.ts`/`handleIncomingMessage.ts` (hoy solo tiene un placeholder); (2)
@@ -375,38 +425,26 @@ Pendiente (en orden sugerido):
     el resto de guardrails de este documento). Idea de Fabián (16 de agosto 2026),
     documentada también en el Excel (Backlog MVP, B31) y en el Business Case (sección
     17, Parking Lot).
-14. **Brief automático pre-cita** — el panel muestra un resumen breve (2-3 líneas,
+16. **Brief automático pre-cita** — el panel muestra un resumen breve (2-3 líneas,
     generado por IA) de lo que el paciente ya contó por WhatsApp al agendar, para que
     el dentista no tenga que abrir el hilo completo antes de cada cita. Límite
     importante: la IA relata lo que el paciente dijo textualmente, nunca interpreta ni
     genera hipótesis clínicas — mismo guardrail que el resto del producto. Inspirado en
     investigación de competencia (Dentalink/Huli, ver Excel B32).
-15. **Lista de espera con relleno automático** — al procesar una cancelación
+17. **Lista de espera con relleno automático** — al procesar una cancelación
     (`handleSchedulingTurn.ts`), ofrecer automáticamente el horario liberado a
     pacientes en espera o que habían pedido algo más cercano, en vez de solo liberarlo
     sin más. Patrón estándar en herramientas de automatización dental (ver Excel B33)
     — métrica de valor muy demostrable para clientes piloto (ingreso recuperado, no
     solo espacio liberado).
-16. **Recordatorio de control periódico (recall)** — panel muestra pacientes que ya
+18. **Recordatorio de control periódico (recall)** — panel muestra pacientes que ya
     pasaron su intervalo normal de control (ej. limpieza cada 6 meses) sin volver.
     Distinto de B21 (seguimiento postconsulta): esto es sobre visitas de rutina
     vencidas, no atención post-tratamiento. El dentista aprueba el envío del
     recordatorio — no se dispara solo, dado el consentimiento requerido bajo la Ley
     8968 (ver Excel B34).
-14. **Brief automático antes de cada cita** — resumen breve (Claude) de lo que el
-    paciente ya contó por WhatsApp, visible en el panel antes de atenderlo. Relata
-    textualmente, nunca interpreta ni diagnostica — mismo guardrail que el resto del
-    producto. Inspirado en investigación de mercado (Dentalink, Huli). Excel: B32.
-15. **Lista de espera con relleno automático** — al cancelar una cita, el bot ofrece
-    automáticamente ese horario a otro paciente en espera en vez de dejarlo vacío.
-    Patrón estándar en herramientas de automatización dental (DoctorConnect,
-    RevenueWell), con evidencia de recuperación de ingresos real. Excel: B33.
-16. **Recordatorio de control periódico (recall)** — panel muestra pacientes atrasados
-    para su próxima visita de rutina; el dentista aprueba el envío del recordatorio vía
-    el bot (nunca se dispara solo, por la Ley 8968). Distinto de B21 (seguimiento
-    post-tratamiento). Excel: B34.
 
-Las tres ideas #14-16 surgieron de una investigación de mercado (Dentalink, Huli,
+Las ideas #15-18 surgieron de una investigación de mercado (Dentalink, Huli,
 DoctorConnect/RevenueWell) hecha el 16 de agosto 2026, a pedido de Fabián para
 identificar funciones de valor que otros productos ya validan. Documentadas también en
 el Excel (Backlog MVP) y el Business Case (Parking Lot).

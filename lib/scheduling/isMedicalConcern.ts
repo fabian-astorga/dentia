@@ -17,7 +17,7 @@
 // palabra "sangr" sola, que no existe en español — habría dejado
 // pasar "sangrando" sin detectar, exactamente el caso real que falló.
 const MEDICAL_CONCERN_PATTERN =
-  /\b(duele\w*|dolor\w*|adolorid\w*|sangr\w*|fiebre\w*|hinchad\w*|inflamad\w*|urgen\w*|emergencia\w*|infecci[oó]n\w*|pus|absces\w*)\b/i;
+  /\b(duele\w*|dolor\w*|adolorid\w*|sangr\w*|fiebre\w*|hinchad\w*|inflamad\w*|urgen\w*|emergencia\w*|infecci[oó]n\w*|pus|absces\w*|molest\w*|incomod\w*|sensib\w*)\b/i;
 
 export function isMedicalConcern(messageText: string): boolean {
   return MEDICAL_CONCERN_PATTERN.test(messageText);
