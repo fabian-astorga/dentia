@@ -5,7 +5,7 @@ import { generateReply } from "@/lib/ai/generateReply";
 import { matchAppointmentByText } from "./matchAppointmentByText";
 import { getAvailableSlots } from "@/lib/google/availability";
 import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from "@/lib/google/calendar";
-import { matchSlotSelection } from "./matchSlotSelection";
+import { matchSlotSelection, suggestNearestSlots } from "./matchSlotSelection";
 import { isAffirmative } from "./isAffirmative";
 import { isDecline } from "./isDecline";
 import { isMedicalConcern } from "./isMedicalConcern";
@@ -214,6 +214,28 @@ export async function handleSchedulingTurn(
         const replyText = await generateReply({ situation: "off_topic_during_flow", facts: {} });
         return { replyText, newContext: context };
       }
+
+      // Antes de repetir la lista completa sin cambios, intentamos
+      // sugerir específicamente lo más cercano a lo que el paciente
+      // escribió — encontrado necesario cuando la duración de la cita
+      // deja horarios en intervalos "raros" (20 min en vez de 30), y el
+      // paciente pide una hora razonable que simplemente no está en el
+      // menú (ej. "11:30" cuando solo hay 11:20/11:40). Repetir la
+      // misma pared de texto sin ayudar a entender por qué se siente
+      // robótico; sugerir lo cercano se siente como que el bot
+      // entendió la intención. Nunca reserva nada por su cuenta — el
+      // paciente igual tiene que confirmar una opción explícita.
+      const nearest = suggestNearestSlots(messageText, context.offeredSlots);
+      if (nearest.length > 0) {
+        const nearestFormatted = nearest.map((s) => formatTimeForHuman(new Date(s.start))).join(" o ");
+        return {
+          replyText: `Esa hora exacta no la tengo, pero sí tengo ${nearestFormatted} — ¿te sirve alguna? Si preferís otra, elegí de la lista completa: ${context.offeredSlots
+            .map((s) => formatTimeForHuman(new Date(s.start)))
+            .join(", ")}.`,
+          newContext: context,
+        };
+      }
+
       return {
         replyText: `No logré identificar cuál horario elegiste. Las opciones eran: ${context.offeredSlots
           .map((s) => formatTimeForHuman(new Date(s.start)))
