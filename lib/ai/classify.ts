@@ -5,7 +5,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export type Intent = "faq" | "agendar_cita" | "caso_especial";
 
-export type DetectedIntent = Intent | "saludo" | "cortesia";
+export type DetectedIntent = Intent | "saludo" | "cortesia" | "reprogramar_cita" | "cancelar_cita";
 
 export interface ClassificationResult {
   intent: Intent;

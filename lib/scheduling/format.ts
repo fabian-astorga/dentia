@@ -33,3 +33,20 @@ export function formatDateLabel(dateISO: string): string {
     timeZone: "America/Costa_Rica",
   });
 }
+
+// Día completo (weekday + número + mes) a partir de un Date con hora
+// precisa — no hace falta el truco de mediodía fijo de formatDateLabel
+// porque ya tenemos un instante exacto, no solo una fecha sin hora.
+// Agregado para pasarle el día explícito a generateReply en las
+// confirmaciones de cita: sin esto, el prompt no tenía ningún dato de
+// día y Claude terminaba inventando referencias relativas como
+// "mañana" que podían ser incorrectas — un paciente confiando en eso
+// se presentaría el día equivocado. Ver Notas técnicas en CLAUDE.md.
+export function formatFullDayLabel(date: Date): string {
+  return date.toLocaleDateString("es-CR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: TIME_ZONE,
+  });
+}

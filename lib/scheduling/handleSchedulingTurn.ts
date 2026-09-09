@@ -9,7 +9,7 @@ import { matchSlotSelection, suggestNearestSlots } from "./matchSlotSelection";
 import { isAffirmative } from "./isAffirmative";
 import { isDecline } from "./isDecline";
 import { isMedicalConcern } from "./isMedicalConcern";
-import { formatTimeForHuman, formatDateTimeForHuman, formatDateLabel } from "./format";
+import { formatTimeForHuman, formatDateTimeForHuman, formatDateLabel, formatFullDayLabel } from "./format";
 import { getCostaRicaTodayISO } from "./timezone";
 import {
   insertAppointment,
@@ -44,6 +44,15 @@ interface SchedulingResult {
   replyText: string;
   newContext: SchedulingContext;
   escalated?: boolean;
+  // Qué acción se resolvió realmente en este turno — usado por
+  // handleIncomingMessage.ts para etiquetar la conversación en el panel
+  // con precisión ("Cancelar cita" en vez de "Agendar cita" genérico
+  // para todo lo que pasa por este archivo). Antes no existía este
+  // campo y el panel mostraba "Agendar cita" incluso para
+  // cancelaciones — encontrado revisando el panel al final del guión
+  // de pruebas. Opcional porque algunos turnos (ej. declinar el flujo)
+  // no tienen una acción clara que etiquetar.
+  action?: "book" | "reschedule" | "cancel";
 }
 
 // Normaliza texto en español para comparaciones tolerantes a tildes —
@@ -80,6 +89,7 @@ async function offerSlotsForDate(
     return {
       replyText: "No encontré espacios disponibles ese día. ¿Querés probar con otra fecha?",
       newContext: { step: "collecting_date", reason, action, appointmentId },
+      action,
     };
   }
 
@@ -101,6 +111,7 @@ async function offerSlotsForDate(
       action,
       appointmentId,
     },
+    action,
   };
 }
 
@@ -113,6 +124,7 @@ async function beginActionForAppointment(
     return {
       replyText: `¿Confirmás que querés cancelar tu cita del ${formatDateTimeForHuman(appointment.scheduledAt)}?`,
       newContext: { step: "confirming_cancellation", appointmentId: appointment.id },
+      action: "cancel",
     };
   }
 
@@ -120,6 +132,7 @@ async function beginActionForAppointment(
   return {
     replyText,
     newContext: { step: "collecting_date", action: "reschedule", appointmentId: appointment.id },
+    action: "reschedule",
   };
 }
 
@@ -160,7 +173,7 @@ export async function handleSchedulingTurn(
 
   if (context.step !== "confirming_cancellation" && isDecline(messageText)) {
     const replyText = await generateReply({ situation: "flow_exited", facts: {} });
-    return { replyText, newContext: {} };
+    return { replyText, newContext: {}, action: context.action };
   }
 
   if (context.step === "selecting_appointment" && context.action) {
@@ -178,6 +191,7 @@ export async function handleSchedulingTurn(
         replyText:
           "No logré identificar cuál cita es. ¿Podés escribir la fecha y hora exacta, tal como te la confirmamos?",
         newContext: context,
+        action: context.action,
       };
     }
 
@@ -188,12 +202,16 @@ export async function handleSchedulingTurn(
     const confirmed = isAffirmative(messageText);
 
     if (confirmed === null) {
-      return { replyText: "¿Confirmás que querés cancelar la cita? Respondé sí o no.", newContext: context };
+      return {
+        replyText: "¿Confirmás que querés cancelar la cita? Respondé sí o no.",
+        newContext: context,
+        action: "cancel",
+      };
     }
 
     if (!confirmed) {
       const replyText = await generateReply({ situation: "cancellation_declined", facts: {} });
-      return { replyText, newContext: {} };
+      return { replyText, newContext: {}, action: "cancel" };
     }
 
     const appointment = await getAppointmentById(context.appointmentId);
@@ -203,7 +221,7 @@ export async function handleSchedulingTurn(
     await updateAppointmentStatus(context.appointmentId, "cancelled");
 
     const replyText = await generateReply({ situation: "cancellation_confirmed", facts: {} });
-    return { replyText, newContext: {} };
+    return { replyText, newContext: {}, action: "cancel" };
   }
 
   if (context.step === "awaiting_slot_selection" && context.offeredSlots?.length) {
@@ -212,7 +230,7 @@ export async function handleSchedulingTurn(
     if (!chosen) {
       if (looksLikeQuestion(messageText)) {
         const replyText = await generateReply({ situation: "off_topic_during_flow", facts: {} });
-        return { replyText, newContext: context };
+        return { replyText, newContext: context, action: context.action };
       }
 
       // Antes de repetir la lista completa sin cambios, intentamos
@@ -233,6 +251,7 @@ export async function handleSchedulingTurn(
             .map((s) => formatTimeForHuman(new Date(s.start)))
             .join(", ")}.`,
           newContext: context,
+          action: context.action,
         };
       }
 
@@ -241,6 +260,7 @@ export async function handleSchedulingTurn(
           .map((s) => formatTimeForHuman(new Date(s.start)))
           .join(", ")}. ¿Cuál preferís?`,
         newContext: context,
+        action: context.action,
       };
     }
 
@@ -256,9 +276,12 @@ export async function handleSchedulingTurn(
 
       const replyText = await generateReply({
         situation: "reschedule_confirmed",
-        facts: { hora: formatTimeForHuman(new Date(chosen.start)) },
+        facts: {
+          día: formatFullDayLabel(new Date(chosen.start)),
+          hora: formatTimeForHuman(new Date(chosen.start)),
+        },
       });
-      return { replyText, newContext: {} };
+      return { replyText, newContext: {}, action: "reschedule" };
     }
 
     const patient = await findOrCreatePatient(clinicId, phone);
@@ -278,9 +301,12 @@ export async function handleSchedulingTurn(
 
     const replyText = await generateReply({
       situation: "booking_confirmed",
-      facts: { hora: formatTimeForHuman(new Date(chosen.start)) },
+      facts: {
+        día: formatFullDayLabel(new Date(chosen.start)),
+        hora: formatTimeForHuman(new Date(chosen.start)),
+      },
     });
-    return { replyText, newContext: {} };
+    return { replyText, newContext: {}, action: "book" };
   }
 
   if (context.step === "collecting_date") {
@@ -290,9 +316,13 @@ export async function handleSchedulingTurn(
     if (!extraction.date) {
       if (looksLikeQuestion(messageText)) {
         const replyText = await generateReply({ situation: "off_topic_during_flow", facts: {} });
-        return { replyText, newContext: context };
+        return { replyText, newContext: context, action: context.action };
       }
-      return { replyText: "No logré entender la fecha. ¿Podés decirme el día de nuevo?", newContext: context };
+      return {
+        replyText: "No logré entender la fecha. ¿Podés decirme el día de nuevo?",
+        newContext: context,
+        action: context.action,
+      };
     }
 
     return offerSlotsForDate(
@@ -314,6 +344,7 @@ export async function handleSchedulingTurn(
       return {
         replyText: "No encontré ninguna cita activa a tu nombre. ¿Querés agendar una nueva?",
         newContext: {},
+        action: intent.action,
       };
     }
 
@@ -342,6 +373,7 @@ export async function handleSchedulingTurn(
           intent.action === "cancel" ? "cancelar" : "reprogramar"
         }.`,
         newContext: { step: "selecting_appointment", action: intent.action },
+        action: intent.action,
       };
     }
 
@@ -359,12 +391,13 @@ export async function handleSchedulingTurn(
     return {
       replyText,
       newContext: { step: "collecting_date", action: "reschedule", appointmentId: appointment.id },
+      action: "reschedule",
     };
   }
 
   if (!intent.date) {
     const replyText = await generateReply({ situation: "ask_date", facts: {} });
-    return { replyText, newContext: { step: "collecting_date", reason: intent.reason } };
+    return { replyText, newContext: { step: "collecting_date", reason: intent.reason }, action: "book" };
   }
 
   return offerSlotsForDate(clinicId, intent.date, intent.reason, "book", undefined);

@@ -17,6 +17,17 @@ import { insertEscalation } from "@/lib/db/queries/escalations";
 import { getClinicSchedulingConfig } from "@/lib/db/queries/clinics";
 import { isWithinBusinessHours, formatOpeningTime } from "@/lib/scheduling/isWithinBusinessHours";
 
+// Traduce la 'action' resuelta por handleSchedulingTurn a la etiqueta
+// que se guarda y se muestra en el panel — antes cualquier cosa que
+// pasara por ese archivo se etiquetaba genéricamente "agendar_cita",
+// incluso cancelaciones y reprogramaciones. Encontrado revisando el
+// panel al final del guión de pruebas (13 de septiembre 2026).
+const ACTION_TO_INTENT: Record<"book" | "reschedule" | "cancel", DetectedIntent> = {
+  book: "agendar_cita",
+  reschedule: "reprogramar_cita",
+  cancel: "cancelar_cita",
+};
+
 export async function handleIncomingMessage(
   clinicId: string,
   fromPhone: string,
@@ -46,7 +57,11 @@ export async function handleIncomingMessage(
     const result = await handleSchedulingTurn(clinicId, fromPhone, messageText, context, conversation.id);
     replyText = result.replyText;
     await updateConversationContext(conversation.id, result.newContext);
-    detectedIntent = result.escalated ? "caso_especial" : "agendar_cita";
+    detectedIntent = result.escalated
+      ? "caso_especial"
+      : result.action
+        ? ACTION_TO_INTENT[result.action]
+        : "agendar_cita";
   } else if (isGreeting(messageText)) {
     // Traemos el nombre real de la clínica para que el paciente sienta
     // que le habla a SU clínica, no a un producto genérico llamado
@@ -74,7 +89,11 @@ export async function handleIncomingMessage(
       const result = await handleSchedulingTurn(clinicId, fromPhone, messageText, {}, conversation.id);
       replyText = result.replyText;
       await updateConversationContext(conversation.id, result.newContext);
-      if (result.escalated) detectedIntent = "caso_especial";
+      if (result.escalated) {
+        detectedIntent = "caso_especial";
+      } else if (result.action) {
+        detectedIntent = ACTION_TO_INTENT[result.action];
+      }
     } else if (classification.intent === "faq") {
       replyText = await generateReply({ situation: "faq_placeholder", facts: {} });
     } else {

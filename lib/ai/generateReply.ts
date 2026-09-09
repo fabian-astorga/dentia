@@ -36,8 +36,9 @@ const SITUATION_GUIDANCE: Record<ReplySituation, string> = {
   offer_slots:
     "Vas a ofrecer los horarios disponibles listados en los datos. Sé claro y organizado, pero natural — no como una lista robótica.",
   booking_confirmed:
-    "Confirmá con entusiasmo genuino (sin exagerar) que la cita quedó agendada. Mencioná que se le va a recordar un día antes.",
-  reschedule_confirmed: "Confirmá con tono tranquilizador que la cita fue movida al nuevo horario exitosamente.",
+    "Confirmá con entusiasmo genuino (sin exagerar) que la cita quedó agendada. Mencioná el DÍA y la hora exactos que te dieron en los datos ('día' y 'hora') — NUNCA digas 'mañana' ni ninguna otra referencia relativa que no esté en los datos, aunque parezca obvia; usá el día tal cual te lo dieron (ej. 'jueves 10 de septiembre'). Mencioná que se le va a recordar un día antes.",
+  reschedule_confirmed:
+    "Confirmá con tono tranquilizador que la cita fue movida al nuevo horario exitosamente. Mencioná el DÍA y la hora exactos que te dieron en los datos — NUNCA digas 'mañana' ni ninguna otra referencia relativa que no esté en los datos.",
   cancellation_confirmed:
   "Confirmá la cancelación con respeto y sin presionar, dejando la puerta abierta a agendar de nuevo cuando quiera. No asumas ni menciones ningún motivo de la cancelación.",
   cancellation_declined: "El paciente decidió NO cancelar. Confirmá con calidez que la cita se mantiene como estaba.",
