@@ -41,6 +41,15 @@ export async function getAppointmentById(appointmentId: string) {
   return appointment ?? null;
 }
 
+// Solo citas pendientes/confirmadas Y que todavía no pasaron. Antes
+// solo filtraba por status, así que una cita de esta mañana a las 9am
+// seguía apareciendo como "activa" y cancelable hasta la medianoche
+// (o para siempre, si nadie la marca "completed" manualmente — nada en
+// el sistema lo hace automático todavía). Encontrado en vivo: el bot
+// ofrecía cancelar una cita de las 9am cuando ya eran las 6pm.
+// No resuelve el problema de fondo (falta un proceso que marque citas
+// viejas como completed/no_show), pero corta el síntoma visible para
+// el paciente de inmediato — ver Notas técnicas en CLAUDE.md.
 export async function findActiveAppointmentsForPatient(clinicId: string, patientId: string) {
   return db
     .select()
@@ -49,7 +58,8 @@ export async function findActiveAppointmentsForPatient(clinicId: string, patient
       and(
         eq(appointments.clinicId, clinicId),
         eq(appointments.patientId, patientId),
-        inArray(appointments.status, ["pending", "confirmed"])
+        inArray(appointments.status, ["pending", "confirmed"]),
+        gte(appointments.scheduledAt, new Date())
       )
     )
     .orderBy(appointments.scheduledAt);

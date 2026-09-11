@@ -9,7 +9,7 @@ import { matchSlotSelection, suggestNearestSlots } from "./matchSlotSelection";
 import { isAffirmative } from "./isAffirmative";
 import { isDecline } from "./isDecline";
 import { isMedicalConcern } from "./isMedicalConcern";
-import { formatTimeForHuman, formatDateTimeForHuman, formatDateLabel, formatFullDayLabel } from "./format";
+import { formatTimeForHuman, formatDateLabel, formatFullDayLabel, formatFullDateTimeForHuman } from "./format";
 import { getCostaRicaTodayISO } from "./timezone";
 import {
   insertAppointment,
@@ -122,7 +122,7 @@ async function beginActionForAppointment(
 ): Promise<SchedulingResult> {
   if (action === "cancel") {
     return {
-      replyText: `¿Confirmás que querés cancelar tu cita del ${formatDateTimeForHuman(appointment.scheduledAt)}?`,
+      replyText: `¿Confirmás que querés cancelar tu cita del ${formatFullDateTimeForHuman(appointment.scheduledAt)}?`,
       newContext: { step: "confirming_cancellation", appointmentId: appointment.id },
       action: "cancel",
     };
@@ -363,7 +363,7 @@ export async function handleSchedulingTurn(
         return beginActionForAppointment(clinicId, match, intent.action as "cancel" | "reschedule");
       }
 
-      const list = active.map((a) => formatDateTimeForHuman(new Date(a.scheduledAt))).join("; ");
+      const list = active.map((a) => formatFullDateTimeForHuman(new Date(a.scheduledAt))).join("; ");
       // Si ya identificamos una fecha en el mensaje (aunque no haya
       // alcanzado para desambiguar sola), lo que realmente falta es la
       // hora — no repetir "la fecha" cuando el paciente ya la dio.

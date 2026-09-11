@@ -50,3 +50,15 @@ export function formatFullDayLabel(date: Date): string {
     timeZone: TIME_ZONE,
   });
 }
+
+// Día completo + hora, ej. "jueves 17 de septiembre, 4:40 p. m.".
+// Usar en cualquier lugar donde el paciente pueda tener más de una
+// cita en semanas distintas — "jueves" solo (formatDateTimeForHuman)
+// es genuinamente ambiguo si hay un jueves esta semana Y otro la que
+// viene. Encontrado en vivo: el bot listó "jueves, 9:00 a. m.; jueves,
+// 3:00 p. m.; jueves, 4:40 p. m." donde dos eran de HOY y una era de
+// una semana después — sin el día del mes, no hay forma de saber cuál
+// es cuál. Ver Notas técnicas en CLAUDE.md.
+export function formatFullDateTimeForHuman(date: Date): string {
+  return `${formatFullDayLabel(date)}, ${formatTimeForHuman(date)}`;
+}
