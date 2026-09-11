@@ -133,9 +133,23 @@ export const messages = pgTable(
     direction: messageDirection("direction").notNull(),
     content: text("content").notNull(),
     detectedIntent: text("detected_intent"), // null for outbound or when not applicable
+    // El wamid de WhatsApp (solo en mensajes entrantes) — único, para
+    // poder detectar cuando Meta reintenta la entrega del MISMO
+    // mensaje (pasa después de cualquier error 500 nuestro) y no
+    // procesarlo dos veces. Encontrado en producción el 7-8 de
+    // septiembre 2026: durante una ventana en que el token de Google
+    // Calendar estaba vencido, varios webhooks fallaron con 500, y
+    // Meta reintentó esos mismos mensajes horas después — sin esta
+    // columna, cada reintento generaba una respuesta duplicada del
+    // bot. Nullable porque los mensajes salientes (outbound) no tienen
+    // wamid propio en este punto del flujo.
+    whatsappMessageId: text("whatsapp_message_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (table) => [index("messages_conversation_idx").on(table.conversationId)]
+  (table) => [
+    index("messages_conversation_idx").on(table.conversationId),
+    uniqueIndex("messages_whatsapp_message_id_idx").on(table.whatsappMessageId),
+  ]
 );
 
 // ─── Appointments ───────────────────────────────────────────────────────

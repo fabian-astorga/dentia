@@ -9,7 +9,7 @@ import {
   touchConversation,
   updateConversationContext,
 } from "@/lib/db/queries/conversations";
-import { insertMessage, setDetectedIntent } from "@/lib/db/queries/messages";
+import { insertMessage, setDetectedIntent, findMessageByWhatsappId } from "@/lib/db/queries/messages";
 import { handleSchedulingTurn, type SchedulingContext } from "@/lib/scheduling/handleSchedulingTurn";
 import { generateReply } from "@/lib/ai/generateReply";
 import { notifyStaffOfEscalation } from "@/lib/notifications/notifyStaff";
@@ -31,15 +31,45 @@ const ACTION_TO_INTENT: Record<"book" | "reschedule" | "cancel", DetectedIntent>
 export async function handleIncomingMessage(
   clinicId: string,
   fromPhone: string,
-  messageText: string
+  messageText: string,
+  whatsappMessageId?: string
 ) {
+  // Idempotencia: si Meta reintenta la entrega de este mismo mensaje
+  // (pasa después de cualquier error 500 nuestro — lo confirmamos en
+  // vivo el 7-8 de septiembre 2026, cuando el token de Google Calendar
+  // vencido tiró varios 500 y Meta reintentó esos mensajes horas
+  // después), cortamos ACÁ, antes de tocar nada — nada de clasificar
+  // de nuevo, nada de llamar a Claude, nada de responder de nuevo.
+  if (whatsappMessageId) {
+    const existing = await findMessageByWhatsappId(whatsappMessageId);
+    if (existing) {
+      return { conversation: null, replyText: null, deduped: true };
+    }
+  }
+
   const conversation = await findOrCreateConversation(clinicId, fromPhone);
 
-  const inboundMessage = await insertMessage({
-    conversationId: conversation.id,
-    direction: "inbound",
-    content: messageText,
-  });
+  let inboundMessage;
+  try {
+    inboundMessage = await insertMessage({
+      conversationId: conversation.id,
+      direction: "inbound",
+      content: messageText,
+      whatsappMessageId,
+    });
+  } catch (err) {
+    // Red de seguridad para la rara condición de carrera de dos
+    // reintentos casi simultáneos, que el chequeo de arriba podría no
+    // alcanzar a atrapar: si el índice único de whatsappMessageId
+    // rechaza el insert, es porque ya se procesó — no tirar 500 (eso
+    // solo generaría OTRO reintento de Meta), simplemente cortar acá.
+    const isDuplicateKeyError =
+      whatsappMessageId && err && typeof err === "object" && "code" in err && err.code === "23505";
+    if (isDuplicateKeyError) {
+      return { conversation, replyText: null, deduped: true };
+    }
+    throw err;
+  }
 
   await touchConversation(conversation.id);
 

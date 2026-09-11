@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     return new NextResponse("EVENT_RECEIVED", { status: 200 });
   }
 
-  await handleIncomingMessage(clinicId, incomingMessage.from, incomingMessage.text.body);
+  await handleIncomingMessage(clinicId, incomingMessage.from, incomingMessage.text.body, incomingMessage.id);
 
   return new NextResponse("EVENT_RECEIVED", { status: 200 });
 }
