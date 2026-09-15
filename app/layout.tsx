@@ -20,13 +20,15 @@ export default function RootLayout({
       <head>
         <link
           rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css"
+          href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.46.0/tabler-icons.min.css"
         />
-        {/* La URL anterior (jsdelivr, @tabler/icons-webfont) le faltaba
-            el segmento /dist/ en la ruta — apuntaba a un archivo que
-            no existe (404 silencioso), por eso ningún ícono cargaba.
-            Esta URL de cdnjs es la que ya usamos con éxito en los
-            mockups de hoy — confirmada funcionando, no solo teórica. */}
+        {/* Confirmada directo en cdnjs.com/libraries/tabler-icons —
+            la estructura de carpetas cambió entre versiones: en la
+            2.44.0 (y las que probé antes) los archivos vivían dentro
+            de iconfont/, pero en la versión actual (3.46.0) los
+            movieron a la raíz sin esa subcarpeta. Dos intentos
+            anteriores fallaron por esto — esta la verifiqué visitando
+            la página real del CDN, no adivinando de nuevo. */}
       </head>
       <body className="min-h-full flex flex-col font-[family-name:var(--font-body)]">{children}</body>
     </html>
