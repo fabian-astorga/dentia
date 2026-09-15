@@ -1,24 +1,26 @@
 import Link from "next/link";
-import { Logo } from "@/components/Logo";
+import { PanelShell } from "@/components/PanelShell";
 import { listConversationsForCurrentUser } from "@/lib/supabase/queries/conversations";
 import { listMessagesForConversationAsCurrentUser } from "@/lib/supabase/queries/messages";
+import { getCurrentUserClinicSettings } from "@/lib/supabase/queries/clinic";
 import { STATUS_LABEL, STATUS_STYLE, INTENT_LABEL, INTENT_STYLE } from "@/lib/ui/labels";
 import { relativeTime } from "@/lib/utils/time";
 
 export default async function PanelPage({ searchParams }: { searchParams: Promise<{ id?: string }> }) {
   const { id } = await searchParams;
-  const allConversations = await listConversationsForCurrentUser();
+  const [allConversations, clinic] = await Promise.all([
+    listConversationsForCurrentUser(),
+    getCurrentUserClinicSettings(),
+  ]);
   const selectedId = id ?? allConversations[0]?.id;
   const thread = selectedId ? await listMessagesForConversationAsCurrentUser(selectedId) : [];
   const selected = allConversations.find((c) => c.id === selectedId);
 
   return (
-    <div className="h-screen bg-brand-bg flex text-brand-text">
-      <aside className="w-[360px] shrink-0 border-r border-brand-border flex flex-col">
-        <div className="px-6 pt-6 pb-4">
-          <Logo />
-          <div className="mt-3 h-[3px] w-10 bg-brand-accent" />
-          <p className="mt-3 text-[11px] uppercase tracking-wide text-brand-muted">Conversaciones · {allConversations.length}</p>
+    <PanelShell clinicName={clinic?.name ?? "DentIA"}>
+      <aside className="w-[320px] shrink-0 border-r border-brand-border flex flex-col">
+        <div className="px-6 pt-4 pb-2">
+          <p className="text-[11px] uppercase tracking-wide text-brand-muted">Conversaciones · {allConversations.length}</p>
         </div>
         <div className="flex-1 overflow-y-auto">
           {allConversations.length === 0 && (
@@ -88,6 +90,6 @@ export default async function PanelPage({ searchParams }: { searchParams: Promis
           </>
         )}
       </main>
-    </div>
+    </PanelShell>
   );
 }
